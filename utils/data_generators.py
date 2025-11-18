@@ -52,6 +52,11 @@ class SyntheticImageDataset(Dataset):
         Returns:
             Tuple of (image, label)
         """
+        # Seed based on index for reproducibility
+        if self.seed is not None:
+            torch.manual_seed(self.seed + idx)
+            np.random.seed(self.seed + idx)
+
         # Generate random image
         image = torch.randn(self.num_channels, self.image_size, self.image_size)
 
@@ -99,6 +104,11 @@ class SyntheticSequenceDataset(Dataset):
         Returns:
             Tuple of (input_sequence, target_sequence)
         """
+        # Seed based on index for reproducibility
+        if self.seed is not None:
+            torch.manual_seed(self.seed + idx)
+            np.random.seed(self.seed + idx)
+
         # Generate random input sequence
         input_seq = torch.randint(0, self.vocab_size, (self.seq_length,))
 
@@ -133,6 +143,7 @@ class SyntheticRegressionDataset(Dataset):
         self.input_dim = input_dim
         self.output_dim = output_dim
         self.noise_std = noise_std
+        self.seed = seed
 
         if seed is not None:
             torch.manual_seed(seed)
@@ -151,6 +162,11 @@ class SyntheticRegressionDataset(Dataset):
         Returns:
             Tuple of (input, target)
         """
+        # Seed based on index for reproducibility
+        if self.seed is not None:
+            torch.manual_seed(self.seed + idx)
+            np.random.seed(self.seed + idx)
+
         # Generate input
         x = torch.randn(self.input_dim)
 

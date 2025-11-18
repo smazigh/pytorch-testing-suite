@@ -138,6 +138,28 @@ class PerformanceBenchmark:
 
         return iteration_time
 
+    def get_throughput(self, batch_size: int = None) -> float:
+        """
+        Get average throughput in samples per second.
+
+        Args:
+            batch_size: Batch size to use for calculation. If None, uses configured batch_size.
+
+        Returns:
+            Average samples per second
+        """
+        if batch_size is None:
+            batch_size = self.batch_size
+
+        if batch_size == 0 or not self.metrics.iteration_times:
+            return 0.0
+
+        avg_time = np.mean(self.metrics.iteration_times)
+        if avg_time == 0:
+            return 0.0
+
+        return batch_size / avg_time
+
     def record_loss(self, loss: float) -> None:
         """Record loss value."""
         self.metrics.losses.append(float(loss))
