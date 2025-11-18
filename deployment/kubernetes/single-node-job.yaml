@@ -1,0 +1,63 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pytorch-single-node
+  labels:
+    app: pytorch-test-suite
+    workload-type: single-node
+spec:
+  template:
+    metadata:
+      labels:
+        app: pytorch-test-suite
+        workload-type: single-node
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: pytorch-workload
+        image: pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            cd /workspace
+            pip install -r requirements/base.txt
+            python3 workloads/single_node/cnn_training.py --config config/config.yaml
+
+        resources:
+          requests:
+            nvidia.com/gpu: 1
+            memory: "16Gi"
+            cpu: "4"
+          limits:
+            nvidia.com/gpu: 1
+            memory: "32Gi"
+            cpu: "8"
+
+        volumeMounts:
+        - name: pytorch-test-suite
+          mountPath: /workspace
+        - name: results
+          mountPath: /workspace/results
+
+        env:
+        - name: CUDA_VISIBLE_DEVICES
+          value: "0"
+        - name: PYTHONUNBUFFERED
+          value: "1"
+
+      volumes:
+      - name: pytorch-test-suite
+        configMap:
+          name: pytorch-test-suite-code
+      - name: results
+        emptyDir: {}
+
+      # Node selector for GPU nodes
+      nodeSelector:
+        nvidia.com/gpu: "true"
+
+      # Tolerations for GPU nodes
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule

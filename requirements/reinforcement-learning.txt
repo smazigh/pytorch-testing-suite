@@ -1,0 +1,18 @@
+# Reinforcement Learning Requirements
+# Additional dependencies for RL workloads
+
+-r base.txt
+
+# RL environments and frameworks
+gymnasium>=0.29.0
+gym>=0.26.0  # For backward compatibility
+
+# RL algorithms (optional, we implement our own)
+stable-baselines3>=2.1.0  # Optional reference implementation
+
+# Environment rendering (optional)
+pygame>=2.5.0
+opencv-python>=4.8.0
+
+# Additional utilities for RL
+scipy>=1.11.0

@@ -1,0 +1,118 @@
+apiVersion: kubeflow.org/v1
+kind: PyTorchJob
+metadata:
+  name: pytorch-multi-node-ddp
+  labels:
+    app: pytorch-test-suite
+    workload-type: multi-node
+spec:
+  pytorchReplicaSpecs:
+    Master:
+      replicas: 1
+      restartPolicy: OnFailure
+      template:
+        metadata:
+          labels:
+            app: pytorch-test-suite
+            role: master
+        spec:
+          containers:
+          - name: pytorch-master
+            image: pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime
+            command: ["/bin/bash", "-c"]
+            args:
+              - |
+                cd /workspace
+                pip install -r requirements/distributed.txt
+                python3 workloads/multi_node/ddp_training.py --config config/config.yaml
+
+            resources:
+              requests:
+                nvidia.com/gpu: 1
+                memory: "16Gi"
+                cpu: "4"
+              limits:
+                nvidia.com/gpu: 1
+                memory: "32Gi"
+                cpu: "8"
+
+            volumeMounts:
+            - name: pytorch-test-suite
+              mountPath: /workspace
+            - name: results
+              mountPath: /workspace/results
+
+            env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+
+          volumes:
+          - name: pytorch-test-suite
+            configMap:
+              name: pytorch-test-suite-code
+          - name: results
+            persistentVolumeClaim:
+              claimName: pytorch-results-pvc
+
+          nodeSelector:
+            nvidia.com/gpu: "true"
+
+          tolerations:
+          - key: nvidia.com/gpu
+            operator: Exists
+            effect: NoSchedule
+
+    Worker:
+      replicas: 3
+      restartPolicy: OnFailure
+      template:
+        metadata:
+          labels:
+            app: pytorch-test-suite
+            role: worker
+        spec:
+          containers:
+          - name: pytorch-worker
+            image: pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime
+            command: ["/bin/bash", "-c"]
+            args:
+              - |
+                cd /workspace
+                pip install -r requirements/distributed.txt
+                python3 workloads/multi_node/ddp_training.py --config config/config.yaml
+
+            resources:
+              requests:
+                nvidia.com/gpu: 1
+                memory: "16Gi"
+                cpu: "4"
+              limits:
+                nvidia.com/gpu: 1
+                memory: "32Gi"
+                cpu: "8"
+
+            volumeMounts:
+            - name: pytorch-test-suite
+              mountPath: /workspace
+            - name: results
+              mountPath: /workspace/results
+
+            env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+
+          volumes:
+          - name: pytorch-test-suite
+            configMap:
+              name: pytorch-test-suite-code
+          - name: results
+            persistentVolumeClaim:
+              claimName: pytorch-results-pvc
+
+          nodeSelector:
+            nvidia.com/gpu: "true"
+
+          tolerations:
+          - key: nvidia.com/gpu
+            operator: Exists
+            effect: NoSchedule

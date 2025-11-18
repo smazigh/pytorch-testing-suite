@@ -1,0 +1,18 @@
+# Distributed Training Requirements
+# Additional dependencies for multi-node training
+
+-r base.txt
+
+# Note: torch.distributed is included in PyTorch 2.0+
+
+# For better multi-node performance
+ninja>=1.11.0
+
+# Environment management
+python-dotenv>=1.0.0
+
+# Monitoring for distributed jobs
+tensorboard>=2.13.0
+
+# Note: FairScale is optional for advanced distributed features
+# Install separately if needed: pip install fairscale

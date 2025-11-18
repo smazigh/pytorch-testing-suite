@@ -1,0 +1,194 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main, develop, claude/** ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  lint:
+    name: Code Quality Checks
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install black isort flake8 pylint
+
+    - name: Check code formatting with Black
+      run: black --check --diff .
+      continue-on-error: true
+
+    - name: Check import sorting with isort
+      run: isort --check-only --diff .
+      continue-on-error: true
+
+    - name: Lint with flake8
+      run: |
+        # Stop the build if there are Python syntax errors or undefined names
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        # Exit-zero treats all errors as warnings
+        flake8 . --count --exit-zero --max-complexity=15 --max-line-length=120 --statistics
+      continue-on-error: true
+
+  unit-tests:
+    name: Unit Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.8', '3.9', '3.10', '3.11']
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements/base.txt
+        pip install -r requirements/test.txt
+
+    - name: Run unit tests
+      run: |
+        pytest tests/unit/ -v -m "unit" --cov=utils --cov-report=xml --cov-report=term
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      if: matrix.python-version == '3.10'
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements/base.txt
+        pip install -r requirements/distributed.txt
+        pip install -r requirements/reinforcement-learning.txt
+        pip install -r requirements/test.txt
+
+    - name: Run integration tests (smoke)
+      run: |
+        pytest tests/integration/ -v -m "integration and smoke" --timeout=300
+
+    - name: Run integration tests (full)
+      run: |
+        pytest tests/integration/ -v -m "integration and not slow" --timeout=600
+      continue-on-error: true
+
+  test-imports:
+    name: Test All Imports
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements/base.txt
+        pip install -r requirements/distributed.txt
+        pip install -r requirements/reinforcement-learning.txt
+
+    - name: Test utility imports
+      run: |
+        python -c "from utils import *"
+        python -c "from utils.config_loader import ConfigLoader"
+        python -c "from utils.logger import get_logger"
+        python -c "from utils.benchmark import PerformanceBenchmark"
+        python -c "from utils.gpu_monitor import GPUMonitor"
+        python -c "from utils.data_generators import *"
+
+    - name: Test workload imports
+      run: |
+        python -c "from workloads.single_node.cnn_training import CNNTrainer"
+        python -c "from workloads.single_node.transformer_training import TransformerTrainer"
+        python -c "from workloads.single_node.gpu_burnin import GPUBurnIn"
+        python -c "from workloads.single_node.mixed_precision import MixedPrecisionTrainer"
+        python -c "from workloads.multi_node.ddp_training import DDPTrainer"
+        python -c "from workloads.multi_node.fsdp_training import FSDPTrainer"
+        python -c "from workloads.reinforcement_learning.ppo_training import PPOTrainer"
+
+  deployment-scripts:
+    name: Test Deployment Scripts
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Test standalone scripts exist and are executable
+      run: |
+        test -x deployment/standalone/run_single.sh
+        test -x deployment/standalone/run_multi.sh
+        echo "All deployment scripts are executable"
+
+    - name: Test SLURM batch scripts exist
+      run: |
+        test -f deployment/slurm/single-node.sbatch
+        test -f deployment/slurm/multi-node.sbatch
+        echo "All SLURM batch scripts exist"
+
+    - name: Test Kubernetes manifests are valid YAML
+      run: |
+        python -c "import yaml; yaml.safe_load(open('deployment/kubernetes/single-node-job.yaml'))"
+        python -c "import yaml; yaml.safe_load(open('deployment/kubernetes/multi-node-job.yaml'))"
+        echo "All Kubernetes manifests are valid YAML"
+
+    - name: Test config file is valid YAML
+      run: |
+        python -c "import yaml; yaml.safe_load(open('config/config.yaml'))"
+        echo "Config file is valid YAML"
+
+  documentation:
+    name: Documentation Check
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Check README files exist
+      run: |
+        test -f README.md
+        test -f deployment/standalone/README.md
+        test -f deployment/kubernetes/README.md
+        test -f deployment/slurm/README.md
+        echo "All README files exist"
+
+    - name: Check requirements files exist
+      run: |
+        test -f requirements/base.txt
+        test -f requirements/distributed.txt
+        test -f requirements/reinforcement-learning.txt
+        test -f requirements/test.txt
+        echo "All requirement files exist"

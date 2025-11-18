@@ -1,0 +1,170 @@
+# PyTorch Testing Framework - Main Configuration File
+# Edit these values to customize your workload runs
+
+# General settings
+general:
+  log_level: INFO  # DEBUG, INFO, WARNING, ERROR
+  output_dir: ./results  # Where to save results and logs
+  seed: 42  # Random seed for reproducibility
+  benchmark_interval: 10  # Log benchmark metrics every N iterations
+
+# GPU settings
+gpu:
+  device: cuda  # cuda or cpu
+  device_ids: [0]  # List of GPU IDs to use, e.g., [0, 1, 2, 3]
+  mixed_precision: true  # Use automatic mixed precision (AMP)
+  amp_dtype: float16  # float16 or bfloat16
+  cudnn_benchmark: true  # Enable cuDNN auto-tuner
+  cudnn_deterministic: false  # Set to true for reproducibility (slower)
+
+# Burn-in settings
+burnin:
+  level: high  # low, medium, high, extreme
+  duration_minutes: 30  # How long to run burn-in tests
+  target_utilization: 95  # Target GPU utilization percentage
+  memory_fraction: 0.9  # Fraction of GPU memory to use
+
+# Training settings
+training:
+  epochs: 10
+  batch_size: 64  # Per-GPU batch size
+  gradient_accumulation_steps: 1  # Simulate larger batch sizes
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  warmup_epochs: 1
+  num_workers: 4  # DataLoader workers
+  pin_memory: true
+  prefetch_factor: 2
+
+# Optimizer settings
+optimizer:
+  type: adamw  # sgd, adam, adamw
+  momentum: 0.9  # For SGD
+  betas: [0.9, 0.999]  # For Adam/AdamW
+
+# Scheduler settings
+scheduler:
+  type: cosine  # step, cosine, exponential, none
+  step_size: 30  # For step scheduler
+  gamma: 0.1  # Learning rate decay factor
+
+# Distributed settings
+distributed:
+  backend: nccl  # nccl, gloo, mpi
+  init_method: env://  # env://, tcp://localhost:23456, file:///path/to/file
+  world_size: 1  # Total number of processes
+  rank: 0  # Rank of current process
+  local_rank: 0  # Local rank on current node
+  find_unused_parameters: false  # DDP setting
+  gradient_as_bucket_view: true  # DDP optimization
+
+# Checkpoint settings
+checkpoint:
+  enabled: true
+  save_dir: ./checkpoints
+  save_interval: 5  # Save every N epochs
+  keep_last_n: 3  # Keep only last N checkpoints
+
+# Logging settings
+logging:
+  tensorboard: true
+  tensorboard_dir: ./runs
+  log_gradients: false
+  log_weights: false
+  console_log_interval: 10  # Log to console every N iterations
+
+# Workload-specific settings
+workloads:
+  # CNN workload settings
+  cnn:
+    model: resnet50  # resnet18, resnet50, resnet101, vgg16, efficientnet_b0
+    image_size: 224
+    num_classes: 1000
+    synthetic_data: true  # Use synthetic data (no dataset required)
+    dataset_size: 50000  # Number of synthetic samples
+
+  # Transformer workload settings
+  transformer:
+    model_type: encoder  # encoder, decoder, encoder-decoder
+    vocab_size: 30000
+    max_seq_length: 512
+    model_dim: 768
+    num_layers: 12
+    num_heads: 12
+    feedforward_dim: 3072
+    dropout: 0.1
+    synthetic_data: true
+    dataset_size: 100000
+
+  # Mixed precision workload settings
+  mixed_precision:
+    enabled: true
+    loss_scale: dynamic  # dynamic or fixed value
+    growth_interval: 2000
+
+  # GPU burn-in settings
+  gpu_burnin:
+    matrix_size: 8192  # Size of matrices for computation
+    operations: [matmul, conv2d, attention]  # Operations to stress test
+    stress_level: 100  # Percentage of GPU to stress
+
+  # DDP (Distributed Data Parallel) settings
+  ddp:
+    model: resnet50
+    nodes: 1
+    gpus_per_node: 1
+    gradient_checkpointing: false
+
+  # FSDP (Fully Sharded Data Parallel) settings
+  fsdp:
+    model: gpt2_large
+    sharding_strategy: full_shard  # full_shard, shard_grad_op, no_shard
+    cpu_offload: false
+    activation_checkpointing: false
+
+  # Reinforcement Learning settings
+  reinforcement_learning:
+    algorithm: ppo  # ppo, dqn, a3c
+    environment: synthetic  # Use synthetic environment (no external deps)
+    env_type: continuous  # continuous or discrete
+
+    # PPO specific
+    ppo:
+      clip_epsilon: 0.2
+      value_coef: 0.5
+      entropy_coef: 0.01
+      gae_lambda: 0.95
+      num_steps: 2048
+      num_epochs: 10
+      mini_batch_size: 64
+
+    # DQN specific
+    dqn:
+      buffer_size: 100000
+      learning_starts: 10000
+      target_update_interval: 1000
+      epsilon_start: 1.0
+      epsilon_end: 0.01
+      epsilon_decay: 0.995
+
+    # A3C specific
+    a3c:
+      num_workers: 4
+      t_max: 5
+      gamma: 0.99
+
+# Monitoring settings
+monitoring:
+  gpu_stats: true  # Monitor GPU utilization, memory, temperature
+  cpu_stats: true  # Monitor CPU usage
+  memory_stats: true  # Monitor system memory
+  network_stats: false  # Monitor network I/O (for distributed)
+  profile_performance: false  # Enable PyTorch profiler (adds overhead)
+
+# Performance optimization
+performance:
+  compile_model: false  # Use torch.compile (PyTorch 2.0+)
+  compile_backend: inductor  # inductor, aot_eager
+  channels_last: false  # Use channels-last memory format for CNNs
+  tf32: true  # Allow TF32 on Ampere+ GPUs
+  matmul_precision: high  # high, medium, low (for newer GPUs)
