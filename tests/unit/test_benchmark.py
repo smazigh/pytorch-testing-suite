@@ -264,3 +264,193 @@ class TestBenchmarkEdgeCases:
         summary = benchmark.get_summary()
         assert 'final_loss' in summary
         assert 'final_accuracy' in summary
+
+
+@pytest.mark.unit
+class TestBenchmarkAdvanced:
+    """Advanced tests for benchmark to improve coverage."""
+
+    def test_print_summary(self, temp_dir, capsys):
+        """Test print_summary method."""
+        benchmark = PerformanceBenchmark(
+            name='print_test',
+            output_dir=str(temp_dir)
+        )
+        benchmark.configure(batch_size=16)
+
+        # Add some data
+        for i in range(5):
+            benchmark.start_iteration()
+            time.sleep(0.001)
+            benchmark.end_iteration()
+            benchmark.record_loss(1.0 - i * 0.1)
+
+        benchmark.print_summary()
+        captured = capsys.readouterr()
+
+        assert 'Summary' in captured.out or len(captured.out) > 0
+
+    def test_multiple_epochs(self, temp_dir):
+        """Test tracking multiple epochs."""
+        benchmark = PerformanceBenchmark(output_dir=str(temp_dir))
+        benchmark.configure(batch_size=8)
+
+        for epoch in range(3):
+            benchmark.start_epoch()
+            for _ in range(5):
+                benchmark.start_iteration()
+                time.sleep(0.001)
+                benchmark.end_iteration()
+            benchmark.end_epoch()
+
+        summary = benchmark.get_summary()
+        assert summary['num_epochs'] == 3
+        assert summary['num_iterations'] == 15
+
+    def test_gpu_metrics_summary(self, temp_dir):
+        """Test GPU metrics in summary."""
+        benchmark = PerformanceBenchmark(output_dir=str(temp_dir))
+
+        # Record GPU metrics
+        for i in range(5):
+            benchmark.record_gpu_metrics(
+                utilization=50.0 + i * 10,
+                memory_used=4.0 + i * 0.5,
+                memory_allocated=3.5 + i * 0.5,
+                temperature=60.0 + i * 2
+            )
+
+        summary = benchmark.get_summary()
+        assert 'avg_gpu_utilization' in summary
+        assert 'peak_gpu_memory_gb' in summary
+
+    def test_samples_per_sec_recording(self, temp_dir):
+        """Test samples per second recording."""
+        benchmark = PerformanceBenchmark(output_dir=str(temp_dir))
+        benchmark.configure(batch_size=32)
+
+        for _ in range(5):
+            benchmark.start_iteration()
+            time.sleep(0.001)
+            benchmark.end_iteration()
+
+        assert len(benchmark.metrics.samples_per_sec) == 5
+        assert all(s > 0 for s in benchmark.metrics.samples_per_sec)
+
+    def test_custom_metrics(self, temp_dir):
+        """Test recording custom metrics."""
+        benchmark = PerformanceBenchmark(output_dir=str(temp_dir))
+
+        # Record standard metrics with iteration
+        benchmark.start_iteration()
+        benchmark.end_iteration()
+        benchmark.record_loss(0.5)
+        benchmark.record_accuracy(0.9)
+
+        # Record GPU metrics separately
+        benchmark.record_gpu_metrics(
+            utilization=80.0,
+            memory_used=6.0,
+            memory_allocated=5.5,
+            temperature=65.0
+        )
+
+        assert benchmark.metrics.losses[-1] == 0.5
+        assert benchmark.metrics.gpu_memory_used[-1] == 6.0
+
+    def test_summary_with_tokens(self, temp_dir):
+        """Test summary includes token throughput for sequence models."""
+        benchmark = PerformanceBenchmark(output_dir=str(temp_dir))
+        benchmark.configure(batch_size=16, sequence_length=256)
+
+        for _ in range(3):
+            benchmark.start_iteration()
+            time.sleep(0.001)
+            benchmark.end_iteration()
+
+        summary = benchmark.get_summary()
+        assert 'avg_tokens_per_sec' in summary
+
+    def test_summary_with_tflops(self, temp_dir):
+        """Test summary includes TFLOPS for models with flops configured."""
+        benchmark = PerformanceBenchmark(output_dir=str(temp_dir))
+        benchmark.configure(batch_size=16, model_flops=1e12)
+
+        for _ in range(3):
+            benchmark.start_iteration()
+            time.sleep(0.001)
+            benchmark.end_iteration()
+
+        summary = benchmark.get_summary()
+        assert 'avg_tflops' in summary
+
+    def test_no_output_dir(self):
+        """Test benchmark without output directory."""
+        benchmark = PerformanceBenchmark(name='no_output')
+
+        # Should still work for basic operations
+        benchmark.start_iteration()
+        benchmark.end_iteration()
+        benchmark.record_loss(0.5)
+
+        summary = benchmark.get_summary()
+        assert summary['num_iterations'] == 1
+
+    def test_get_throughput_with_custom_batch(self, temp_dir):
+        """Test get_throughput with custom batch size."""
+        benchmark = PerformanceBenchmark(output_dir=str(temp_dir))
+        benchmark.configure(batch_size=32)
+
+        for _ in range(5):
+            benchmark.start_iteration()
+            time.sleep(0.001)
+            benchmark.end_iteration()
+
+        # Test with different batch sizes
+        throughput_32 = benchmark.get_throughput(32)
+        throughput_64 = benchmark.get_throughput(64)
+
+        assert throughput_64 > throughput_32
+
+    def test_epoch_without_iterations(self, temp_dir):
+        """Test epoch timing without any iterations."""
+        benchmark = PerformanceBenchmark(output_dir=str(temp_dir))
+
+        benchmark.start_epoch()
+        time.sleep(0.001)
+        epoch_time = benchmark.end_epoch()
+
+        assert epoch_time > 0
+        assert benchmark.metrics.epoch_times[0] == epoch_time
+
+    def test_iteration_times_consistency(self, temp_dir):
+        """Test that iteration times are recorded consistently."""
+        benchmark = PerformanceBenchmark(output_dir=str(temp_dir))
+
+        times = []
+        for _ in range(5):
+            benchmark.start_iteration()
+            time.sleep(0.001)
+            iter_time = benchmark.end_iteration()
+            times.append(iter_time)
+
+        # Times should match what was recorded
+        assert benchmark.metrics.iteration_times == times
+
+    def test_save_both_formats(self, temp_dir):
+        """Test saving in both JSON and CSV formats."""
+        benchmark = PerformanceBenchmark(
+            name='dual_format',
+            output_dir=str(temp_dir)
+        )
+
+        for _ in range(3):
+            benchmark.start_iteration()
+            benchmark.end_iteration()
+            benchmark.record_loss(0.5)
+
+        benchmark.save_results(format='json')
+        benchmark.save_results(format='csv')
+
+        assert (temp_dir / 'dual_format_summary.json').exists()
+        assert (temp_dir / 'dual_format_metrics.csv').exists()
