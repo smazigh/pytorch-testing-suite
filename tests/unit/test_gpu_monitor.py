@@ -416,3 +416,89 @@ class TestGPUMonitorAdvanced:
         assert "GPU0" in summary
         assert "8.0" in summary  # allocated memory
         assert "16.0" in summary  # total memory
+
+
+@pytest.mark.unit
+class TestGPUMonitorNVML:
+    """Tests for NVML-related functionality."""
+
+    @patch('torch.cuda.is_available', return_value=True)
+    @patch('torch.cuda.device_count', return_value=1)
+    def test_monitor_nvml_not_initialized(self, mock_count, mock_available):
+        """Test monitor when NVML is not initialized."""
+        monitor = GPUMonitor(device_ids=[0])
+        monitor.nvml_initialized = False
+        assert monitor.device_ids == [0]
+
+    @patch('torch.cuda.is_available', return_value=True)
+    @patch('torch.cuda.device_count', return_value=1)
+    @patch('torch.cuda.memory_allocated', return_value=2e9)
+    @patch('torch.cuda.get_device_properties')
+    def test_get_metrics_no_nvml(self, mock_props, mock_mem, mock_count, mock_available):
+        """Test get_metrics falls back to PyTorch when NVML unavailable."""
+        mock_props.return_value = MagicMock(total_memory=8e9)
+
+        monitor = GPUMonitor(device_ids=[0])
+        monitor.nvml_initialized = False
+
+        metrics = monitor.get_metrics(0)
+
+        assert metrics is not None
+        assert metrics.memory_allocated == 2.0
+        assert metrics.memory_total == 8.0
+        assert metrics.utilization == 0.0
+
+    @patch('torch.cuda.is_available', return_value=True)
+    @patch('torch.cuda.device_count', return_value=1)
+    @patch('torch.cuda.get_device_name', return_value='Test GPU')
+    @patch('torch.cuda.get_device_capability', return_value=(7, 5))
+    @patch('torch.cuda.get_device_properties')
+    def test_get_gpu_info_no_nvml(self, mock_props, mock_cap, mock_name, mock_count, mock_available):
+        """Test get_gpu_info without NVML."""
+        mock_props.return_value = MagicMock(total_memory=12e9)
+
+        monitor = GPUMonitor(device_ids=[0])
+        monitor.nvml_initialized = False
+
+        info = monitor.get_gpu_info(0)
+
+        assert info['name'] == 'Test GPU'
+        assert info['capability'] == (7, 5)
+        assert info['memory_total_gb'] == 12.0
+
+    @patch('torch.cuda.is_available', return_value=True)
+    @patch('torch.cuda.device_count', return_value=1)
+    @patch('torch.cuda.memory_allocated', return_value=4e9)
+    @patch('torch.cuda.get_device_properties')
+    def test_print_metrics_with_zeros(self, mock_props, mock_mem, mock_count, mock_available, capsys):
+        """Test print_metrics when temperature/power are zero."""
+        mock_props.return_value = MagicMock(total_memory=16e9)
+
+        monitor = GPUMonitor(device_ids=[0])
+        monitor.nvml_initialized = False
+
+        monitor.print_metrics(0)
+        captured = capsys.readouterr()
+
+        assert "GPU 0 Metrics" in captured.out
+        assert "Memory Used" in captured.out
+
+    @patch('torch.cuda.is_available', return_value=True)
+    @patch('torch.cuda.device_count', return_value=2)
+    @patch('torch.cuda.memory_allocated', return_value=3e9)
+    @patch('torch.cuda.get_device_properties')
+    def test_log_metrics_summary_multiple_gpus(self, mock_props, mock_mem, mock_count, mock_available):
+        """Test log_metrics_summary with multiple GPUs."""
+        mock_props.return_value = MagicMock(total_memory=16e9)
+
+        monitor = GPUMonitor(device_ids=[0, 1])
+        summary = monitor.log_metrics_summary()
+
+        assert "GPU0" in summary
+        assert "GPU1" in summary
+
+    def test_destructor_no_crash(self, mock_gpu_available):
+        """Test that destructor doesn't crash."""
+        monitor = GPUMonitor()
+        monitor.nvml_initialized = False
+        del monitor
