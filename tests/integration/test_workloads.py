@@ -301,6 +301,7 @@ class TestUtilsIntegration:
 
 
 @pytest.mark.integration
+@pytest.mark.smoke
 class TestBenchmarkMetrics:
     """Test BenchmarkMetrics in integration context."""
 
@@ -323,6 +324,7 @@ class TestBenchmarkMetrics:
 
 
 @pytest.mark.integration
+@pytest.mark.smoke
 class TestCNNTraining:
     """Integration tests for CNN training workload."""
 
@@ -393,6 +395,7 @@ class TestCNNTraining:
 
 
 @pytest.mark.integration
+@pytest.mark.smoke
 class TestTransformerTraining:
     """Integration tests for Transformer training workload."""
 
@@ -452,6 +455,7 @@ class TestTransformerTraining:
 
 
 @pytest.mark.integration
+@pytest.mark.smoke
 class TestGPUBurnIn:
     """Integration tests for GPU burn-in workload."""
 
@@ -508,6 +512,7 @@ class TestGPUBurnIn:
 
 
 @pytest.mark.integration
+@pytest.mark.smoke
 class TestMixedPrecision:
     """Integration tests for mixed precision workload."""
 
@@ -525,6 +530,7 @@ class TestMixedPrecision:
 
 
 @pytest.mark.integration
+@pytest.mark.smoke
 class TestReinforcementLearning:
     """Integration tests for RL workloads."""
 
@@ -570,6 +576,7 @@ class TestReinforcementLearning:
 
 
 @pytest.mark.integration
+@pytest.mark.smoke
 @pytest.mark.distributed
 class TestDistributedWorkloads:
     """Integration tests for distributed workloads."""
