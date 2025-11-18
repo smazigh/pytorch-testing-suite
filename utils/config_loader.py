@@ -5,7 +5,7 @@ Handles loading, validation, and merging of configuration files.
 
 import os
 import yaml
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from pathlib import Path
 
 
@@ -55,18 +55,59 @@ class ConfigLoader:
             # Parse environment variable
             key_parts = env_key[len(prefix):].lower().split('_')
 
-            # Navigate to the correct config section
-            current = config
-            for part in key_parts[:-1]:
-                if part not in current:
-                    current[part] = {}
-                current = current[part]
+            # Find the best match in config structure
+            # Try different combinations of joining parts with underscores
+            path = self._find_config_path(config, key_parts)
 
-            # Set the value with type conversion
-            final_key = key_parts[-1]
-            current[final_key] = self._convert_type(env_value)
+            if path:
+                # Navigate to the correct config section
+                current = config
+                for part in path[:-1]:
+                    if part not in current:
+                        current[part] = {}
+                    current = current[part]
+
+                # Set the value with type conversion
+                final_key = path[-1]
+                current[final_key] = self._convert_type(env_value)
 
         return config
+
+    def _find_config_path(self, config: Dict[str, Any], parts: List[str]) -> Optional[List[str]]:
+        """
+        Find the correct path in config by trying different combinations of joining parts.
+
+        Args:
+            config: Configuration dictionary
+            parts: List of parts from environment variable name
+
+        Returns:
+            List of keys representing the path, or None if not found
+        """
+        if not parts:
+            return []
+
+        # Try different split points
+        for i in range(1, len(parts) + 1):
+            # Join first i parts as a potential key
+            potential_key = '_'.join(parts[:i])
+
+            if potential_key in config:
+                if i == len(parts):
+                    # This is the final key
+                    return [potential_key]
+                elif isinstance(config[potential_key], dict):
+                    # Recursively find the rest of the path
+                    rest = self._find_config_path(config[potential_key], parts[i:])
+                    if rest is not None:
+                        return [potential_key] + rest
+
+        # If no match found in existing config, use the simple approach
+        # (first part as section, rest joined as key)
+        if len(parts) >= 2:
+            return [parts[0], '_'.join(parts[1:])]
+
+        return parts
 
     @staticmethod
     def _convert_type(value: str) -> Any:
