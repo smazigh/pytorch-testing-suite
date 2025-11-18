@@ -5,10 +5,321 @@ Tests actual training runs on CPU with small configurations.
 
 import pytest
 import sys
+import time
+import torch
+import yaml
 from pathlib import Path
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+from utils.benchmark import PerformanceBenchmark, BenchmarkMetrics
+from utils.config_loader import ConfigLoader, load_config
+from utils.data_generators import (
+    SyntheticImageDataset,
+    SyntheticSequenceDataset,
+    SyntheticRegressionDataset,
+    SyntheticReinforcementEnvironment,
+    create_synthetic_dataloader,
+    generate_batch_on_device,
+    SyntheticBurnInGenerator,
+    InfiniteDataLoader,
+    estimate_dataloader_size
+)
+from utils.logger import PerformanceLogger, get_logger, ColoredFormatter
+from utils.gpu_monitor import GPUMonitor, GPUMetrics, check_gpu_availability
+
+
+@pytest.mark.integration
+class TestUtilsIntegration:
+    """Integration tests for utility modules."""
+
+    @pytest.mark.smoke
+    def test_benchmark_full_workflow(self, temp_dir):
+        """Test complete benchmark workflow."""
+        benchmark = PerformanceBenchmark(
+            name='integration_test',
+            output_dir=str(temp_dir)
+        )
+        benchmark.configure(batch_size=16, sequence_length=64, model_flops=1e9)
+
+        # Simulate training
+        for epoch in range(2):
+            benchmark.start_epoch()
+            for i in range(5):
+                benchmark.start_iteration()
+                time.sleep(0.001)  # Small delay
+                benchmark.end_iteration()
+                benchmark.record_loss(1.0 - i * 0.1)
+                benchmark.record_accuracy(0.5 + i * 0.1)
+                benchmark.record_gpu_metrics(
+                    utilization=50.0,
+                    memory_used=4.0,
+                    memory_allocated=3.5,
+                    temperature=60.0
+                )
+            benchmark.end_epoch()
+
+        # Get summary
+        summary = benchmark.get_summary()
+        assert summary['num_iterations'] == 10
+        assert summary['num_epochs'] == 2
+        assert 'avg_iteration_time' in summary
+        assert 'final_loss' in summary
+        assert 'final_accuracy' in summary
+
+        # Test throughput calculation
+        throughput = benchmark.get_throughput()
+        assert throughput > 0
+
+        # Save results
+        benchmark.save_results(format='json')
+        benchmark.save_results(format='csv')
+
+        # Check files exist
+        assert (temp_dir / 'integration_test_summary.json').exists()
+        assert (temp_dir / 'integration_test_metrics.csv').exists()
+
+    @pytest.mark.smoke
+    def test_config_loader_full_workflow(self, temp_dir, sample_config):
+        """Test complete config loader workflow."""
+        # Create config file
+        config_path = temp_dir / 'test_config.yaml'
+        with open(config_path, 'w') as f:
+            yaml.dump(sample_config, f)
+
+        # Load config
+        config = ConfigLoader(str(config_path))
+
+        # Test getting values
+        assert config.get('general.log_level') == 'INFO'
+        assert config.get('training.batch_size') == 4
+        assert config.get('missing.key', 'default') == 'default'
+
+        # Test setting values
+        config.set('training.new_param', 123)
+        assert config.get('training.new_param') == 123
+
+        # Test updating
+        config.update({'training': {'batch_size': 32}})
+        assert config.get('training.batch_size') == 32
+
+        # Test dict access
+        assert config['general']['log_level'] == 'INFO'
+        config['training']['test_value'] = 'test'
+        assert config['training']['test_value'] == 'test'
+
+        # Test saving
+        output_path = temp_dir / 'saved_config.yaml'
+        config.save(str(output_path))
+        assert output_path.exists()
+
+        # Load and verify
+        loaded = load_config(str(output_path))
+        assert loaded.get('training.batch_size') == 32
+
+    @pytest.mark.smoke
+    def test_data_generators_full_workflow(self):
+        """Test data generators end-to-end."""
+        # Image dataset
+        image_ds = SyntheticImageDataset(num_samples=20, image_size=32, num_classes=10, seed=42)
+        assert len(image_ds) == 20
+        img, label = image_ds[0]
+        assert img.shape == (3, 32, 32)
+        assert 0 <= label < 10
+
+        # Sequence dataset
+        seq_ds = SyntheticSequenceDataset(num_samples=20, seq_length=64, vocab_size=1000, seed=42)
+        assert len(seq_ds) == 20
+        inp, tgt = seq_ds[0]
+        assert inp.shape == (64,)
+        assert tgt.shape == (64,)
+
+        # Regression dataset
+        reg_ds = SyntheticRegressionDataset(num_samples=20, input_dim=32, output_dim=1, seed=42)
+        assert len(reg_ds) == 20
+        x, y = reg_ds[0]
+        assert x.shape == (32,)
+
+        # RL environment
+        env = SyntheticReinforcementEnvironment(state_dim=4, action_dim=2, episode_length=10)
+        state = env.reset()
+        assert state.shape == (4,)
+
+        for _ in range(10):
+            action = env.sample_action()
+            next_state, reward, done, info = env.step(action)
+            assert next_state.shape == (4,)
+            if done:
+                break
+
+        # Dataloaders
+        img_loader = create_synthetic_dataloader(
+            dataset_type='image',
+            batch_size=4,
+            num_samples=16,
+            num_workers=0,
+            pin_memory=False,
+            image_size=32
+        )
+        assert len(img_loader) == 4
+
+        seq_loader = create_synthetic_dataloader(
+            dataset_type='sequence',
+            batch_size=4,
+            num_samples=16,
+            num_workers=0,
+            pin_memory=False,
+            seq_length=32
+        )
+        batch = next(iter(seq_loader))
+        assert batch[0].shape == (4, 32)
+
+        reg_loader = create_synthetic_dataloader(
+            dataset_type='regression',
+            batch_size=4,
+            num_samples=16,
+            num_workers=0,
+            pin_memory=False,
+            input_dim=16
+        )
+        batch = next(iter(reg_loader))
+        assert batch[0].shape == (4, 16)
+
+        # Generate batch on device
+        device = torch.device('cpu')
+        inputs, labels = generate_batch_on_device(8, (3, 32, 32), 10, device)
+        assert inputs.shape == (8, 3, 32, 32)
+        assert labels.shape == (8,)
+
+        # Burn-in generator
+        gen = SyntheticBurnInGenerator(4, (3, 32, 32), 10, device)
+        inputs1, labels1 = gen.generate()
+        inputs2, labels2 = gen.generate()
+        assert inputs1.data_ptr() == inputs2.data_ptr()  # Reuses buffers
+
+        # Infinite dataloader
+        base_loader = create_synthetic_dataloader(
+            dataset_type='image',
+            batch_size=2,
+            num_samples=4,
+            num_workers=0,
+            pin_memory=False
+        )
+        inf_loader = InfiniteDataLoader(base_loader)
+        for i, batch in enumerate(inf_loader):
+            if i >= 5:  # More than the dataset size
+                break
+        assert i == 5
+
+        # Estimate dataloader size
+        size_info = estimate_dataloader_size(img_loader, samples=2)
+        assert 'avg_batch_size_mb' in size_info
+        assert 'estimated_total_mb' in size_info
+
+    @pytest.mark.smoke
+    def test_logger_full_workflow(self, temp_dir):
+        """Test logger end-to-end."""
+        logger = get_logger(
+            name='integration_test_logger',
+            log_dir=str(temp_dir),
+            level='DEBUG',
+            rank=0
+        )
+
+        # Test all log levels
+        logger.debug('Debug message')
+        logger.info('Info message')
+        logger.warning('Warning message')
+        logger.error('Error message')
+
+        # Test headers and config logging
+        logger.log_header('Test Header')
+        logger.log_config({'param1': 'value1', 'nested': {'param2': 'value2'}})
+
+        # Test metrics logging
+        logger.log_metrics(
+            epoch=1,
+            iteration=10,
+            metrics={'loss': 0.5, 'accuracy': 0.9},
+            prefix='train'
+        )
+
+        # Test progress logging
+        logger.log_progress(50, 100, metrics={'loss': 0.3}, prefix='Training')
+
+        # Test system and GPU info logging
+        logger.log_system_info({'python': '3.8', 'torch': '2.0'})
+        logger.log_gpu_info({0: {'name': 'Test GPU', 'memory': '16GB'}})
+
+        # Test iteration timing
+        for _ in range(5):
+            logger.start_iteration()
+            time.sleep(0.001)
+            logger.end_iteration()
+
+        avg_time = logger.get_avg_iteration_time()
+        assert avg_time > 0
+
+        throughput = logger.get_throughput(batch_size=32)
+        assert throughput > 0
+
+        # Test progress bar
+        pbar = logger.create_progress_bar(total=10, desc='Test')
+        for i in range(10):
+            pbar.update(1)
+        pbar.close()
+
+        # Test summary
+        logger.log_summary({'final_loss': 0.1, 'epochs': 5})
+
+        # Check metrics file was saved
+        assert logger.metrics_file is not None
+
+    @pytest.mark.smoke
+    def test_gpu_monitor_workflow(self):
+        """Test GPU monitor workflow."""
+        # Check availability
+        info = check_gpu_availability()
+        assert 'cuda_available' in info
+        assert 'num_gpus' in info
+
+        # Create monitor
+        monitor = GPUMonitor(device_ids=[0] if info['num_gpus'] > 0 else None)
+
+        # Get metrics (will be None or actual metrics depending on GPU)
+        if info['cuda_available']:
+            metrics = monitor.get_metrics(0)
+            if metrics:
+                assert isinstance(metrics, GPUMetrics)
+                assert metrics.memory_total >= 0
+        else:
+            # Just test it doesn't crash
+            monitor.get_metrics(0)
+            monitor.get_memory_summary(0)
+            monitor.empty_cache()
+
+
+@pytest.mark.integration
+class TestBenchmarkMetrics:
+    """Test BenchmarkMetrics in integration context."""
+
+    def test_metrics_dataclass(self):
+        """Test BenchmarkMetrics dataclass."""
+        metrics = BenchmarkMetrics()
+        metrics.iteration_times.append(0.1)
+        metrics.losses.append(0.5)
+        metrics.accuracies.append(0.9)
+        metrics.gpu_utilization.append(80.0)
+        metrics.gpu_memory_used.append(8.0)
+        metrics.gpu_temperature.append(65.0)
+        metrics.tflops.append(1.5)
+        metrics.samples_per_sec.append(1000.0)
+        metrics.tokens_per_sec.append(50000.0)
+        metrics.epoch_times.append(30.0)
+
+        assert len(metrics.iteration_times) == 1
+        assert len(metrics.losses) == 1
 
 
 @pytest.mark.integration
