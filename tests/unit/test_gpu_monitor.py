@@ -251,7 +251,7 @@ class TestCheckGPUAvailability:
     @patch('torch.cuda.get_device_name')
     @patch('torch.version.cuda', '11.8')
     @patch('torch.backends.cudnn.version', return_value=8600)
-    def test_check_with_cuda(self, mock_name, mock_count, mock_available):
+    def test_check_with_cuda(self, mock_cudnn, mock_name, mock_count, mock_available):
         """Test check_gpu_availability with CUDA."""
         mock_name.side_effect = ['GPU 0', 'GPU 1']
 
