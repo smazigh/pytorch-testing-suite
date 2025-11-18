@@ -711,11 +711,11 @@ class TestPPOWorkload:
 class TestGPUBurnInWorkload:
     """Additional tests for GPU burn-in workload."""
 
-    def test_burnin_cnn_model(self):
-        """Test burn-in CNN model creation."""
-        from workloads.single_node.gpu_burnin import BurnInCNN
+    def test_burnin_model(self):
+        """Test burn-in model creation."""
+        from workloads.single_node.gpu_burnin import BurnInModel
 
-        model = BurnInCNN(channels=32, num_blocks=2)
+        model = BurnInModel(channels=32, num_blocks=2)
         x = torch.randn(2, 3, 64, 64)
         output = model(x)
 
