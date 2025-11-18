@@ -361,7 +361,6 @@ class TestCNNTraining:
         assert dataloader is not None
         assert len(dataloader) > 0
 
-    @pytest.mark.slow
     def test_cnn_training_epoch(self, config_file, small_dataset_config, temp_dir):
         """Test running one training epoch."""
         import yaml
@@ -421,7 +420,6 @@ class TestTransformerTraining:
         assert model is not None
         assert hasattr(model, 'forward')
 
-    @pytest.mark.slow
     def test_transformer_training_epoch(self, config_file, small_dataset_config, temp_dir):
         """Test running one training epoch."""
         import yaml
@@ -649,3 +647,213 @@ class TestEndToEndSmoke:
                 print(f"Failed to import {workload}: {e}")
 
             assert success, f"Failed to import {workload}"
+
+
+@pytest.mark.integration
+@pytest.mark.smoke
+class TestMixedPrecisionWorkload:
+    """Additional tests for mixed precision workload."""
+
+    def test_mixed_precision_model_creation(self, config_file):
+        """Test mixed precision model creation."""
+        from workloads.single_node.mixed_precision import MixedPrecisionTrainer
+
+        trainer = MixedPrecisionTrainer(config_path=str(config_file))
+        model = trainer.create_model()
+
+        assert model is not None
+        assert hasattr(model, 'forward')
+
+    def test_mixed_precision_dataloader(self, config_file):
+        """Test mixed precision dataloader creation."""
+        from workloads.single_node.mixed_precision import MixedPrecisionTrainer
+
+        trainer = MixedPrecisionTrainer(config_path=str(config_file))
+        dataloader = trainer.create_dataloader()
+
+        assert dataloader is not None
+        assert len(dataloader) > 0
+
+
+@pytest.mark.integration
+@pytest.mark.smoke
+class TestDDPWorkload:
+    """Additional tests for DDP workload."""
+
+    def test_ddp_trainer_initialization(self, config_file):
+        """Test DDP trainer initialization."""
+        from workloads.multi_node.ddp_training import DDPTrainer
+
+        trainer = DDPTrainer(config_path=str(config_file))
+        assert trainer is not None
+
+    def test_ddp_model_creation(self, config_file):
+        """Test DDP model creation."""
+        from workloads.multi_node.ddp_training import DDPTrainer
+
+        trainer = DDPTrainer(config_path=str(config_file))
+        model = trainer.create_model()
+
+        assert model is not None
+        assert hasattr(model, 'forward')
+
+
+@pytest.mark.integration
+@pytest.mark.smoke
+class TestFSDPWorkload:
+    """Additional tests for FSDP workload."""
+
+    def test_fsdp_trainer_initialization(self, config_file):
+        """Test FSDP trainer initialization."""
+        from workloads.multi_node.fsdp_training import FSDPTrainer
+
+        trainer = FSDPTrainer(config_path=str(config_file))
+        assert trainer is not None
+
+    def test_fsdp_model_creation(self, config_file):
+        """Test FSDP model creation."""
+        from workloads.multi_node.fsdp_training import FSDPTrainer
+
+        trainer = FSDPTrainer(config_path=str(config_file))
+        model = trainer.create_model()
+
+        assert model is not None
+        assert hasattr(model, 'forward')
+
+
+@pytest.mark.integration
+@pytest.mark.smoke
+class TestPPOWorkload:
+    """Additional tests for PPO workload."""
+
+    def test_ppo_discrete_action(self):
+        """Test PPO with discrete action space."""
+        from workloads.reinforcement_learning.ppo_training import ActorCritic
+
+        model = ActorCritic(state_dim=8, action_dim=4, continuous=False)
+        state = torch.randn(1, 8)
+        action_logits, _, value = model(state)
+
+        assert action_logits.shape == (1, 4)
+        assert value.shape == (1, 1)
+
+    def test_ppo_compute_returns(self, config_file):
+        """Test PPO compute returns and advantages."""
+        from workloads.reinforcement_learning.ppo_training import PPOTrainer
+
+        trainer = PPOTrainer(config_path=str(config_file))
+
+        # Create dummy rewards, values, dones
+        rewards = [1.0, 0.5, 0.2, 0.1, 0.0]
+        values = [torch.tensor(0.9), torch.tensor(0.6), torch.tensor(0.3),
+                  torch.tensor(0.1), torch.tensor(0.0)]
+        dones = [False, False, False, False, True]
+        next_value = torch.tensor(0.0)
+
+        returns, advantages = trainer.compute_returns_and_advantages(
+            rewards, values, dones, next_value
+        )
+
+        assert len(returns) == 5
+        assert len(advantages) == 5
+
+
+@pytest.mark.integration
+@pytest.mark.smoke
+class TestGPUBurnInWorkload:
+    """Additional tests for GPU burn-in workload."""
+
+    def test_burnin_convolution_stress(self):
+        """Test convolution stress function."""
+        from workloads.single_node.gpu_burnin import convolution_stress
+
+        device = torch.device('cpu')
+
+        try:
+            convolution_stress(
+                batch_size=2,
+                channels=16,
+                size=32,
+                device=device
+            )
+            success = True
+        except Exception as e:
+            success = False
+            print(f"Convolution stress failed: {e}")
+
+        assert success
+
+
+@pytest.mark.integration
+@pytest.mark.smoke
+class TestTransformerWorkload:
+    """Additional tests for Transformer workload."""
+
+    def test_transformer_dataloader(self, config_file):
+        """Test transformer dataloader creation."""
+        from workloads.single_node.transformer_training import TransformerTrainer
+
+        trainer = TransformerTrainer(config_path=str(config_file))
+        dataloader = trainer.create_dataloader()
+
+        assert dataloader is not None
+        assert len(dataloader) > 0
+
+        # Get a batch
+        batch = next(iter(dataloader))
+        assert len(batch) == 2  # input and target
+
+    def test_transformer_forward_pass(self, config_file):
+        """Test transformer forward pass."""
+        from workloads.single_node.transformer_training import TransformerTrainer
+
+        trainer = TransformerTrainer(config_path=str(config_file))
+        model = trainer.create_model()
+        dataloader = trainer.create_dataloader()
+
+        # Get a batch and do forward pass
+        input_seq, target_seq = next(iter(dataloader))
+        output = model(input_seq)
+
+        assert output is not None
+        assert output.shape[0] == input_seq.shape[0]
+
+
+@pytest.mark.integration
+@pytest.mark.smoke
+class TestCNNWorkload:
+    """Additional tests for CNN workload."""
+
+    def test_cnn_forward_pass(self, config_file):
+        """Test CNN forward pass."""
+        from workloads.single_node.cnn_training import CNNTrainer
+
+        trainer = CNNTrainer(config_path=str(config_file))
+        model = trainer.create_model()
+        dataloader = trainer.create_dataloader()
+
+        # Get a batch and do forward pass
+        images, labels = next(iter(dataloader))
+        output = model(images)
+
+        assert output is not None
+        assert output.shape[0] == images.shape[0]
+
+    def test_cnn_loss_computation(self, config_file):
+        """Test CNN loss computation."""
+        import torch.nn as nn
+        from workloads.single_node.cnn_training import CNNTrainer
+
+        trainer = CNNTrainer(config_path=str(config_file))
+        model = trainer.create_model()
+        dataloader = trainer.create_dataloader()
+
+        # Get a batch and compute loss
+        images, labels = next(iter(dataloader))
+        output = model(images)
+
+        criterion = nn.CrossEntropyLoss()
+        loss = criterion(output, labels)
+
+        assert loss is not None
+        assert loss.item() > 0
