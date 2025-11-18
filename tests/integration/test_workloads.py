@@ -1012,6 +1012,7 @@ class TestPPOExtended:
         assert 'actions' in trajectory
         assert 'rewards' in trajectory
         assert len(trajectory['rewards']) == 10
+        assert trajectory['states'].shape[0] == 10
 
     def test_ppo_trainer_log_configuration(self, config_file):
         """Test _log_configuration method."""

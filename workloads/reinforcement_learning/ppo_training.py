@@ -197,8 +197,8 @@ class PPOTrainer:
                 state = env.reset()
 
         return {
-            'states': torch.FloatTensor(states).to(self.device),
-            'actions': torch.FloatTensor(actions).to(self.device),
+            'states': torch.FloatTensor(np.array(states)).to(self.device),
+            'actions': torch.FloatTensor(np.array(actions)).to(self.device),
             'log_probs': torch.FloatTensor(log_probs).to(self.device),
             'rewards': rewards,
             'values': values,

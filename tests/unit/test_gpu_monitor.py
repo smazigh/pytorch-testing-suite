@@ -325,3 +325,94 @@ class TestGPUMonitorPrintAllMetrics:
         assert "GPU Metrics" in captured.out
         assert "GPU 0 Metrics" in captured.out
         assert "GPU 1 Metrics" in captured.out
+
+
+@pytest.mark.unit
+class TestGPUMonitorAdvanced:
+    """Advanced tests for GPUMonitor to improve coverage."""
+
+    @patch('torch.cuda.is_available', return_value=True)
+    @patch('torch.cuda.device_count', return_value=1)
+    @patch('torch.cuda.memory_allocated', return_value=4e9)
+    @patch('torch.cuda.get_device_properties')
+    def test_print_metrics_with_cuda(self, mock_props, mock_mem, mock_count, mock_available, capsys):
+        """Test print_metrics with mocked CUDA."""
+        mock_props.return_value = MagicMock(total_memory=16e9)
+
+        monitor = GPUMonitor(device_ids=[0])
+        monitor.print_metrics(0)
+
+        captured = capsys.readouterr()
+        # Should print metrics without crashing
+        assert len(captured.out) > 0
+
+    def test_print_all_metrics_no_cuda(self, mock_gpu_available, capsys):
+        """Test print_all_metrics when no CUDA."""
+        monitor = GPUMonitor()
+        monitor.device_ids = []
+        monitor.print_all_metrics()
+
+        captured = capsys.readouterr()
+        assert "GPU Metrics" in captured.out
+
+    @patch('torch.cuda.is_available', return_value=True)
+    @patch('torch.cuda.device_count', return_value=0)
+    def test_monitor_with_no_devices(self, mock_count, mock_available):
+        """Test monitor when CUDA is available but no devices."""
+        monitor = GPUMonitor()
+        assert monitor.device_ids == []
+
+    @patch('torch.cuda.is_available', return_value=True)
+    @patch('torch.cuda.device_count', return_value=1)
+    @patch('torch.cuda.memory_allocated', return_value=4e9)
+    @patch('torch.cuda.get_device_properties')
+    def test_get_metrics_default_device(self, mock_props, mock_mem, mock_count, mock_available):
+        """Test get_metrics with default device (None)."""
+        mock_props.return_value = MagicMock(total_memory=16e9)
+
+        monitor = GPUMonitor(device_ids=[0])
+        metrics = monitor.get_metrics()  # Default device
+
+        assert metrics is not None
+        assert metrics.memory_total == 16.0
+
+    @patch('torch.cuda.is_available', return_value=True)
+    @patch('torch.cuda.device_count', return_value=2)
+    def test_monitor_auto_detect_devices(self, mock_count, mock_available):
+        """Test monitor auto-detects all devices when not specified."""
+        monitor = GPUMonitor()
+        assert len(monitor.device_ids) == 2
+        assert monitor.device_ids == [0, 1]
+
+    @patch('torch.cuda.is_available', return_value=True)
+    @patch('torch.cuda.memory_summary', return_value="Detailed Memory Summary")
+    @patch('torch.cuda.device_count', return_value=1)
+    def test_get_memory_summary_default_device(self, mock_count, mock_summary, mock_available):
+        """Test get_memory_summary with default device."""
+        monitor = GPUMonitor(device_ids=[0])
+        summary = monitor.get_memory_summary()  # Default device
+        assert summary == "Detailed Memory Summary"
+
+    @patch('torch.cuda.is_available', return_value=True)
+    @patch('torch.cuda.synchronize')
+    @patch('torch.cuda.device_count', return_value=2)
+    def test_synchronize_all_devices(self, mock_count, mock_sync, mock_available):
+        """Test synchronize with device_id=None synchronizes all."""
+        monitor = GPUMonitor(device_ids=[0, 1])
+        monitor.synchronize(None)
+        mock_sync.assert_called_once()
+
+    @patch('torch.cuda.is_available', return_value=True)
+    @patch('torch.cuda.device_count', return_value=1)
+    @patch('torch.cuda.memory_allocated', return_value=8e9)
+    @patch('torch.cuda.get_device_properties')
+    def test_log_metrics_summary_format(self, mock_props, mock_mem, mock_count, mock_available):
+        """Test log_metrics_summary returns properly formatted string."""
+        mock_props.return_value = MagicMock(total_memory=16e9)
+
+        monitor = GPUMonitor(device_ids=[0])
+        summary = monitor.log_metrics_summary()
+
+        assert "GPU0" in summary
+        assert "8.0" in summary  # allocated memory
+        assert "16.0" in summary  # total memory
