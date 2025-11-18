@@ -796,3 +796,445 @@ class TestCNNWorkload:
 
         assert loss is not None
         assert loss.item() > 0
+
+
+@pytest.mark.integration
+@pytest.mark.smoke
+class TestMixedPrecisionExtended:
+    """Extended tests for mixed precision training to improve coverage."""
+
+    def test_mixed_precision_train_fp32(self, config_file, temp_dir):
+        """Test FP32 training method."""
+        import yaml
+        from workloads.single_node.mixed_precision import MixedPrecisionTrainer
+
+        # Create minimal config
+        config_path = temp_dir / 'mp_config.yaml'
+        with open(config_file) as f:
+            config = yaml.safe_load(f)
+
+        config['training']['batch_size'] = 2
+        config['workloads']['cnn']['dataset_size'] = 8
+        config['general']['output_dir'] = str(temp_dir)
+
+        with open(config_path, 'w') as f:
+            yaml.dump(config, f)
+
+        trainer = MixedPrecisionTrainer(config_path=str(config_path))
+        trainer.num_iterations = 2  # Very few iterations
+
+        model = trainer.create_model()
+        dataloader = trainer.create_dataloader()
+
+        import torch.optim as optim
+        optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+        # Run FP32 training
+        trainer.train_fp32(model, dataloader, optimizer)
+
+        # Check metrics were recorded
+        assert len(trainer.benchmark_fp32.metrics.iteration_times) == 2
+
+    def test_mixed_precision_compare_results(self, config_file, temp_dir):
+        """Test compare_results method."""
+        import yaml
+        from workloads.single_node.mixed_precision import MixedPrecisionTrainer
+
+        config_path = temp_dir / 'mp_compare_config.yaml'
+        with open(config_file) as f:
+            config = yaml.safe_load(f)
+
+        config['training']['batch_size'] = 2
+        config['workloads']['cnn']['dataset_size'] = 4
+        config['general']['output_dir'] = str(temp_dir)
+
+        with open(config_path, 'w') as f:
+            yaml.dump(config, f)
+
+        trainer = MixedPrecisionTrainer(config_path=str(config_path))
+
+        # Add some mock data to benchmarks
+        trainer.benchmark_fp32.configure(batch_size=2)
+        trainer.benchmark_amp.configure(batch_size=2)
+
+        # Record some iteration times
+        for _ in range(3):
+            trainer.benchmark_fp32.start_iteration()
+            trainer.benchmark_fp32.end_iteration()
+            trainer.benchmark_amp.start_iteration()
+            trainer.benchmark_amp.end_iteration()
+
+        # This should not crash
+        trainer.compare_results()
+
+
+@pytest.mark.integration
+@pytest.mark.smoke
+class TestGPUBurnInExtended:
+    """Extended tests for GPU burn-in to improve coverage."""
+
+    def test_burnin_log_configuration(self, config_file):
+        """Test _log_configuration method."""
+        from workloads.single_node.gpu_burnin import GPUBurnIn
+
+        burnin = GPUBurnIn(config_path=str(config_file))
+        # _log_configuration is called in __init__, just verify it didn't crash
+        assert burnin.logger is not None
+        assert burnin.duration_minutes is not None
+
+    def test_burnin_run_matmul(self, config_file, temp_dir):
+        """Test run_matmul_burnin method."""
+        import yaml
+        from workloads.single_node.gpu_burnin import GPUBurnIn
+
+        config_path = temp_dir / 'burnin_config.yaml'
+        with open(config_file) as f:
+            config = yaml.safe_load(f)
+
+        config['workloads']['gpu_burnin'] = {
+            'duration_minutes': 0.01,  # Very short
+            'matrix_size': 64,
+            'operations': ['matmul']
+        }
+        config['general']['output_dir'] = str(temp_dir)
+
+        with open(config_path, 'w') as f:
+            yaml.dump(config, f)
+
+        burnin = GPUBurnIn(config_path=str(config_path))
+        burnin.duration_minutes = 0.01  # Override to be very short
+        burnin.matrix_size = 64
+
+        # Run matmul burnin
+        burnin.run_matmul_burnin()
+
+        assert len(burnin.benchmark.metrics.iteration_times) > 0
+
+    def test_burnin_run_attention(self, config_file, temp_dir):
+        """Test run_attention_burnin method."""
+        import yaml
+        from workloads.single_node.gpu_burnin import GPUBurnIn
+
+        config_path = temp_dir / 'burnin_attn_config.yaml'
+        with open(config_file) as f:
+            config = yaml.safe_load(f)
+
+        config['workloads']['gpu_burnin'] = {
+            'duration_minutes': 0.01,
+            'matrix_size': 64,
+            'operations': ['attention']
+        }
+        config['general']['output_dir'] = str(temp_dir)
+
+        with open(config_path, 'w') as f:
+            yaml.dump(config, f)
+
+        burnin = GPUBurnIn(config_path=str(config_path))
+        burnin.duration_minutes = 0.01
+
+        # Run attention burnin
+        burnin.run_attention_burnin()
+
+        assert len(burnin.benchmark.metrics.iteration_times) > 0
+
+    def test_burnin_model_forward(self):
+        """Test BurnInModel forward pass with various inputs."""
+        from workloads.single_node.gpu_burnin import BurnInModel
+
+        model = BurnInModel(channels=16, num_blocks=2)
+
+        # Test different batch sizes
+        for batch_size in [1, 2, 4]:
+            x = torch.randn(batch_size, 3, 32, 32)
+            output = model(x)
+            assert output.shape == (batch_size, 1000)
+
+
+@pytest.mark.integration
+@pytest.mark.smoke
+class TestPPOExtended:
+    """Extended tests for PPO training to improve coverage."""
+
+    def test_ppo_get_action_continuous(self):
+        """Test get_action method for continuous actions."""
+        from workloads.reinforcement_learning.ppo_training import ActorCritic
+
+        model = ActorCritic(state_dim=8, action_dim=4, continuous=True)
+        state = torch.randn(1, 8)
+
+        action, log_prob, value = model.get_action(state)
+
+        assert action.shape == (1, 4)
+        assert log_prob.shape == (1,)
+        assert value.shape == (1, 1)
+
+    def test_ppo_get_action_discrete(self):
+        """Test get_action method for discrete actions."""
+        from workloads.reinforcement_learning.ppo_training import ActorCritic
+
+        model = ActorCritic(state_dim=8, action_dim=4, continuous=False)
+        state = torch.randn(1, 8)
+
+        action, log_prob, value = model.get_action(state)
+
+        assert action.shape == (1,)
+        assert log_prob.shape == (1,)
+        assert value.shape == (1, 1)
+
+    def test_ppo_compute_returns(self, config_file):
+        """Test compute_returns method."""
+        from workloads.reinforcement_learning.ppo_training import PPOTrainer
+
+        trainer = PPOTrainer(config_path=str(config_file))
+
+        # Create test data
+        rewards = [1.0, 0.5, 0.2, 0.1, 0.0]
+        values = [0.9, 0.5, 0.3, 0.1, 0.05]
+        dones = [False, False, False, False, True]
+
+        returns, advantages = trainer.compute_returns(rewards, values, dones)
+
+        assert len(returns) == 5
+        assert len(advantages) == 5
+        assert returns.device == trainer.device
+
+    def test_ppo_collect_trajectories(self, config_file):
+        """Test collect_trajectories method."""
+        from workloads.reinforcement_learning.ppo_training import PPOTrainer
+
+        trainer = PPOTrainer(config_path=str(config_file))
+        trainer.num_steps = 10  # Very few steps
+
+        env, model = trainer.create_env_and_model()
+        trajectory = trainer.collect_trajectories(env, model)
+
+        assert 'states' in trajectory
+        assert 'actions' in trajectory
+        assert 'rewards' in trajectory
+        assert len(trajectory['rewards']) == 10
+
+    def test_ppo_trainer_log_configuration(self, config_file):
+        """Test _log_configuration method."""
+        from workloads.reinforcement_learning.ppo_training import PPOTrainer
+
+        trainer = PPOTrainer(config_path=str(config_file))
+        # _log_configuration is called in __init__
+        assert trainer.num_steps > 0
+        assert trainer.num_epochs > 0
+        assert trainer.clip_epsilon > 0
+
+
+@pytest.mark.integration
+@pytest.mark.smoke
+class TestConfigLoaderExtended:
+    """Extended tests for config loader to improve coverage."""
+
+    def test_config_deep_nesting(self, temp_dir):
+        """Test deeply nested configuration."""
+        import yaml
+
+        config = {
+            'level1': {
+                'level2': {
+                    'level3': {
+                        'value': 42
+                    }
+                }
+            }
+        }
+
+        config_path = temp_dir / 'nested_config.yaml'
+        with open(config_path, 'w') as f:
+            yaml.dump(config, f)
+
+        loader = ConfigLoader(str(config_path))
+
+        assert loader.get('level1.level2.level3.value') == 42
+        assert loader.get('level1.level2.missing', 'default') == 'default'
+
+    def test_config_type_conversion(self, temp_dir):
+        """Test various type conversions."""
+        import yaml
+
+        config = {
+            'int_val': 42,
+            'float_val': 3.14,
+            'bool_val': True,
+            'str_val': 'hello',
+            'list_val': [1, 2, 3],
+            'none_val': None
+        }
+
+        config_path = temp_dir / 'types_config.yaml'
+        with open(config_path, 'w') as f:
+            yaml.dump(config, f)
+
+        loader = ConfigLoader(str(config_path))
+
+        assert isinstance(loader.get('int_val'), int)
+        assert isinstance(loader.get('float_val'), float)
+        assert isinstance(loader.get('bool_val'), bool)
+        assert isinstance(loader.get('list_val'), list)
+
+    def test_config_update_nested(self, temp_dir, sample_config):
+        """Test updating nested configuration."""
+        import yaml
+
+        config_path = temp_dir / 'update_config.yaml'
+        with open(config_path, 'w') as f:
+            yaml.dump(sample_config, f)
+
+        loader = ConfigLoader(str(config_path))
+
+        # Update nested value
+        loader.update({
+            'training': {
+                'batch_size': 128,
+                'new_key': 'new_value'
+            }
+        })
+
+        assert loader.get('training.batch_size') == 128
+        assert loader.get('training.new_key') == 'new_value'
+        # Original keys should be preserved
+        assert loader.get('training.learning_rate') == 0.001
+
+
+@pytest.mark.integration
+@pytest.mark.smoke
+class TestDataGeneratorsExtended:
+    """Extended tests for data generators to improve coverage."""
+
+    def test_rl_environment_discrete(self):
+        """Test RL environment with discrete actions."""
+        env = SyntheticReinforcementEnvironment(
+            state_dim=4,
+            action_dim=2,
+            continuous_action=False,
+            episode_length=10
+        )
+
+        state = env.reset()
+        assert state.shape == (4,)
+
+        # Take discrete action
+        action = 0
+        next_state, reward, done, info = env.step(action)
+        assert next_state.shape == (4,)
+
+    def test_rl_environment_multiple_episodes(self):
+        """Test RL environment over multiple episodes."""
+        env = SyntheticReinforcementEnvironment(
+            state_dim=4,
+            action_dim=2,
+            episode_length=5,
+            seed=42
+        )
+
+        total_steps = 0
+        for episode in range(3):
+            state = env.reset()
+            done = False
+            while not done:
+                action = env.sample_action()
+                state, reward, done, info = env.step(action)
+                total_steps += 1
+
+        assert total_steps == 15  # 3 episodes * 5 steps
+
+    def test_burnin_generator_reuse(self):
+        """Test SyntheticBurnInGenerator buffer reuse."""
+        device = torch.device('cpu')
+        gen = SyntheticBurnInGenerator(
+            batch_size=2,
+            input_shape=(3, 16, 16),
+            num_classes=10,
+            device=device
+        )
+
+        # Generate multiple times
+        inputs1, labels1 = gen.generate()
+        inputs2, labels2 = gen.generate()
+
+        # Buffers should be reused
+        assert inputs1.data_ptr() == inputs2.data_ptr()
+        assert labels1.data_ptr() == labels2.data_ptr()
+
+    def test_regression_dataset_output_dim(self):
+        """Test SyntheticRegressionDataset with different output dims."""
+        # Multi-output regression
+        ds = SyntheticRegressionDataset(
+            num_samples=10,
+            input_dim=16,
+            output_dim=5,
+            seed=42
+        )
+
+        x, y = ds[0]
+        assert x.shape == (16,)
+        assert y.shape == (5,)
+
+
+@pytest.mark.integration
+@pytest.mark.smoke
+class TestBenchmarkExtended:
+    """Extended tests for benchmark utilities."""
+
+    def test_benchmark_tflops_recording(self, temp_dir):
+        """Test TFLOPS recording."""
+        benchmark = PerformanceBenchmark(
+            name='tflops_test',
+            output_dir=str(temp_dir)
+        )
+        benchmark.configure(batch_size=16, model_flops=1e12)
+
+        # Record some iterations
+        for _ in range(3):
+            benchmark.start_iteration()
+            time.sleep(0.001)
+            benchmark.end_iteration()
+
+        summary = benchmark.get_summary()
+        assert 'avg_iteration_time' in summary
+
+    def test_benchmark_save_csv(self, temp_dir):
+        """Test saving results to CSV."""
+        benchmark = PerformanceBenchmark(
+            name='csv_test',
+            output_dir=str(temp_dir)
+        )
+        benchmark.configure(batch_size=8)
+
+        # Record some data
+        for i in range(5):
+            benchmark.start_iteration()
+            time.sleep(0.001)
+            benchmark.end_iteration()
+            benchmark.record_loss(1.0 - i * 0.1)
+
+        # Save to CSV
+        benchmark.save_results(format='csv')
+
+        csv_file = temp_dir / 'csv_test_metrics.csv'
+        assert csv_file.exists()
+
+    def test_benchmark_epoch_tracking(self, temp_dir):
+        """Test epoch tracking."""
+        benchmark = PerformanceBenchmark(
+            name='epoch_test',
+            output_dir=str(temp_dir)
+        )
+        benchmark.configure(batch_size=8)
+
+        # Run two epochs
+        for epoch in range(2):
+            benchmark.start_epoch()
+            for _ in range(3):
+                benchmark.start_iteration()
+                time.sleep(0.001)
+                benchmark.end_iteration()
+            benchmark.end_epoch()
+
+        summary = benchmark.get_summary()
+        assert summary['num_epochs'] == 2
+        assert summary['num_iterations'] == 6
