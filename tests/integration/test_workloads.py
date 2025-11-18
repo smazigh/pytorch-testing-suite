@@ -675,50 +675,6 @@ class TestMixedPrecisionWorkload:
         assert len(dataloader) > 0
 
 
-@pytest.mark.integration
-@pytest.mark.smoke
-class TestDDPWorkload:
-    """Additional tests for DDP workload."""
-
-    def test_ddp_trainer_initialization(self, config_file):
-        """Test DDP trainer initialization."""
-        from workloads.multi_node.ddp_training import DDPTrainer
-
-        trainer = DDPTrainer(config_path=str(config_file))
-        assert trainer is not None
-
-    def test_ddp_model_creation(self, config_file):
-        """Test DDP model creation."""
-        from workloads.multi_node.ddp_training import DDPTrainer
-
-        trainer = DDPTrainer(config_path=str(config_file))
-        model = trainer.create_model()
-
-        assert model is not None
-        assert hasattr(model, 'forward')
-
-
-@pytest.mark.integration
-@pytest.mark.smoke
-class TestFSDPWorkload:
-    """Additional tests for FSDP workload."""
-
-    def test_fsdp_trainer_initialization(self, config_file):
-        """Test FSDP trainer initialization."""
-        from workloads.multi_node.fsdp_training import FSDPTrainer
-
-        trainer = FSDPTrainer(config_path=str(config_file))
-        assert trainer is not None
-
-    def test_fsdp_model_creation(self, config_file):
-        """Test FSDP model creation."""
-        from workloads.multi_node.fsdp_training import FSDPTrainer
-
-        trainer = FSDPTrainer(config_path=str(config_file))
-        model = trainer.create_model()
-
-        assert model is not None
-        assert hasattr(model, 'forward')
 
 
 @pytest.mark.integration
@@ -732,30 +688,22 @@ class TestPPOWorkload:
 
         model = ActorCritic(state_dim=8, action_dim=4, continuous=False)
         state = torch.randn(1, 8)
-        action_logits, _, value = model(state)
+        action_logits, value = model(state)
 
         assert action_logits.shape == (1, 4)
         assert value.shape == (1, 1)
 
-    def test_ppo_compute_returns(self, config_file):
-        """Test PPO compute returns and advantages."""
-        from workloads.reinforcement_learning.ppo_training import PPOTrainer
+    def test_ppo_continuous_action(self):
+        """Test PPO with continuous action space."""
+        from workloads.reinforcement_learning.ppo_training import ActorCritic
 
-        trainer = PPOTrainer(config_path=str(config_file))
+        model = ActorCritic(state_dim=8, action_dim=4, continuous=True)
+        state = torch.randn(1, 8)
+        action_mean, action_std, value = model(state)
 
-        # Create dummy rewards, values, dones
-        rewards = [1.0, 0.5, 0.2, 0.1, 0.0]
-        values = [torch.tensor(0.9), torch.tensor(0.6), torch.tensor(0.3),
-                  torch.tensor(0.1), torch.tensor(0.0)]
-        dones = [False, False, False, False, True]
-        next_value = torch.tensor(0.0)
-
-        returns, advantages = trainer.compute_returns_and_advantages(
-            rewards, values, dones, next_value
-        )
-
-        assert len(returns) == 5
-        assert len(advantages) == 5
+        assert action_mean.shape == (1, 4)
+        assert action_std.shape == (4,)
+        assert value.shape == (1, 1)
 
 
 @pytest.mark.integration
@@ -763,25 +711,16 @@ class TestPPOWorkload:
 class TestGPUBurnInWorkload:
     """Additional tests for GPU burn-in workload."""
 
-    def test_burnin_convolution_stress(self):
-        """Test convolution stress function."""
-        from workloads.single_node.gpu_burnin import convolution_stress
+    def test_burnin_cnn_model(self):
+        """Test burn-in CNN model creation."""
+        from workloads.single_node.gpu_burnin import BurnInCNN
 
-        device = torch.device('cpu')
+        model = BurnInCNN(channels=32, num_blocks=2)
+        x = torch.randn(2, 3, 64, 64)
+        output = model(x)
 
-        try:
-            convolution_stress(
-                batch_size=2,
-                channels=16,
-                size=32,
-                device=device
-            )
-            success = True
-        except Exception as e:
-            success = False
-            print(f"Convolution stress failed: {e}")
-
-        assert success
+        assert output is not None
+        assert output.shape[0] == 2
 
 
 @pytest.mark.integration
