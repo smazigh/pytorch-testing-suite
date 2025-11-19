@@ -391,3 +391,42 @@ class TestFSDPTrainingLoop:
         assert trainer.epochs == 10
         assert trainer.batch_size == 16
         assert trainer.lr == 0.0001
+
+
+@pytest.mark.unit
+class TestDistributedEnvironmentVariables:
+    """Test distributed training with different environment variables."""
+
+    @patch('torch.distributed.init_process_group')
+    @patch('torch.distributed.get_rank', return_value=2)
+    @patch('torch.distributed.get_world_size', return_value=8)
+    @patch('torch.cuda.set_device')
+    @patch.dict(os.environ, {'LOCAL_RANK': '2'})
+    def test_setup_distributed_rank_2(self, mock_set_device, mock_world_size,
+                                        mock_rank, mock_init):
+        """Test setup_distributed with rank 2."""
+        from workloads.multi_node.ddp_training import setup_distributed
+
+        rank, world_size, local_rank = setup_distributed()
+
+        assert rank == 2
+        assert world_size == 8
+        assert local_rank == 2
+        mock_set_device.assert_called_once_with(2)
+
+    @patch('torch.distributed.init_process_group')
+    @patch('torch.distributed.get_rank', return_value=0)
+    @patch('torch.distributed.get_world_size', return_value=1)
+    @patch('torch.cuda.set_device')
+    @patch.dict(os.environ, {}, clear=True)
+    def test_setup_distributed_default_local_rank(self, mock_set_device, mock_world_size,
+                                                    mock_rank, mock_init):
+        """Test setup_distributed with default LOCAL_RANK."""
+        # Remove LOCAL_RANK from environment
+        os.environ.pop('LOCAL_RANK', None)
+
+        from workloads.multi_node.ddp_training import setup_distributed
+
+        rank, world_size, local_rank = setup_distributed()
+
+        assert local_rank == 0  # Default value
