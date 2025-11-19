@@ -48,14 +48,15 @@ while [[ $# -gt 0 ]]; do
       echo "                                  mixed_precision, gpu_burnin, ppo_training"
       echo "  --config CONFIG        Path to config file (default: config/config.yaml)"
       echo "  --gpu GPU_ID           GPU device ID (default: 0)"
-      echo "  --num-gpus N           Number of GPUs for burn-in (gpu_burnin only)"
-      echo "  --all-gpus             Use all available GPUs (gpu_burnin only)"
+      echo "  --num-gpus N           Number of GPUs (cnn_training, gpu_burnin)"
+      echo "  --all-gpus             Use all available GPUs (cnn_training, gpu_burnin)"
       echo "  --duration MINS        Duration in minutes (gpu_burnin only)"
       echo "  --help                 Show this help message"
       echo ""
       echo "Examples:"
       echo "  $0 --workload cnn_training --gpu 0"
-      echo "  $0 --workload gpu_burnin --config my_config.yaml"
+      echo "  $0 --workload cnn_training --num-gpus 4"
+      echo "  $0 --workload cnn_training --all-gpus"
       echo "  $0 --workload gpu_burnin --num-gpus 4 --duration 30"
       echo "  $0 --workload gpu_burnin --all-gpus"
       exit 0
@@ -101,8 +102,8 @@ if [ ! -f "$REPO_ROOT/$CONFIG" ]; then
     exit 1
 fi
 
-# Set GPU device (only for single GPU mode, not for multi-GPU burn-in)
-if [ "$WORKLOAD" = "gpu_burnin" ] && { [ -n "$NUM_GPUS" ] || [ "$ALL_GPUS" = "true" ]; }; then
+# Set GPU device (only for single GPU mode, not for multi-GPU workloads)
+if { [ "$WORKLOAD" = "gpu_burnin" ] || [ "$WORKLOAD" = "cnn_training" ]; } && { [ -n "$NUM_GPUS" ] || [ "$ALL_GPUS" = "true" ]; }; then
     # Multi-GPU mode: don't restrict CUDA_VISIBLE_DEVICES
     echo "Multi-GPU mode: using all visible GPUs"
 else
@@ -136,18 +137,19 @@ esac
 # Run workload
 cd "$REPO_ROOT"
 
-# Build command with extra arguments for gpu_burnin
+# Build command with extra arguments
 EXTRA_ARGS=""
-if [ "$WORKLOAD" = "gpu_burnin" ]; then
+if [ "$WORKLOAD" = "gpu_burnin" ] || [ "$WORKLOAD" = "cnn_training" ]; then
   if [ -n "$NUM_GPUS" ]; then
     EXTRA_ARGS="$EXTRA_ARGS --num-gpus $NUM_GPUS"
   fi
   if [ "$ALL_GPUS" = "true" ]; then
     EXTRA_ARGS="$EXTRA_ARGS --all-gpus"
   fi
-  if [ -n "$DURATION" ]; then
-    EXTRA_ARGS="$EXTRA_ARGS --duration $DURATION"
-  fi
+fi
+# Duration only applies to gpu_burnin
+if [ "$WORKLOAD" = "gpu_burnin" ] && [ -n "$DURATION" ]; then
+  EXTRA_ARGS="$EXTRA_ARGS --duration $DURATION"
 fi
 
 echo "Running: python3 $SCRIPT --config $CONFIG $EXTRA_ARGS"

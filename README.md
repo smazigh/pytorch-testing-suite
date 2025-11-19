@@ -256,8 +256,12 @@ done
 ### 3. Customer Demonstrations
 Show PyTorch capabilities:
 ```bash
-# Quick CNN demo
+# Quick CNN demo (single GPU)
 ./deployment/standalone/run_single.sh --workload cnn_training
+
+# Multi-GPU CNN training
+./deployment/standalone/run_single.sh --workload cnn_training --num-gpus 4
+./deployment/standalone/run_single.sh --workload cnn_training --all-gpus
 
 # Transformer training
 ./deployment/standalone/run_single.sh --workload transformer_training
@@ -271,6 +275,56 @@ python workloads/reinforcement_learning/ppo_training.py
 
 # With custom config
 python workloads/reinforcement_learning/ppo_training.py --config config/config.yaml
+```
+
+## CNN Training Details
+
+The CNN training workload supports multiple architectures and multi-GPU training using DataParallel.
+
+### Multi-GPU Support
+
+Use DataParallel to distribute training across multiple GPUs:
+
+```bash
+# Single GPU (default)
+./deployment/standalone/run_single.sh --workload cnn_training
+
+# Specific number of GPUs
+./deployment/standalone/run_single.sh --workload cnn_training --num-gpus 4
+
+# All available GPUs
+./deployment/standalone/run_single.sh --workload cnn_training --all-gpus
+```
+
+### Supported Models
+
+- `resnet18`, `resnet50`, `resnet101`
+- `vgg16`
+- `efficientnet_b0`
+
+### Configuration
+
+```yaml
+workloads:
+  cnn:
+    model: resnet50
+    image_size: 224
+    num_classes: 1000
+    dataset_size: 50000
+```
+
+### Output Example
+
+```
+Configuration:
+  Model: resnet50
+  Device: cuda:0
+  Num GPUs: 4
+  GPU IDs: 0, 1, 2, 3
+  Batch Size: 64 (effective: 256)
+  ...
+
+Using DataParallel on 4 GPUs: [0, 1, 2, 3]
 ```
 
 ## PPO Training Details

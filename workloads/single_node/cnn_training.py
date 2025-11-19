@@ -13,7 +13,7 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 import torchvision.models as models
 
 # Add parent directory to path
@@ -29,14 +29,15 @@ from utils import (
 
 
 class CNNTrainer:
-    """Trainer for CNN models."""
+    """Trainer for CNN models with multi-GPU support."""
 
-    def __init__(self, config_path: str = None):
+    def __init__(self, config_path: str = None, num_gpus: int = None):
         """
         Initialize CNN trainer.
 
         Args:
             config_path: Path to configuration file
+            num_gpus: Number of GPUs to use (None = 1, 0 = all available)
         """
         # Load configuration
         self.config = load_config(config_path)
@@ -48,15 +49,25 @@ class CNNTrainer:
             level=self.config.get('general.log_level', 'INFO')
         )
 
+        # Determine number of GPUs
+        available_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 0
+        if num_gpus is None:
+            self.num_gpus = 1
+        elif num_gpus == 0:
+            self.num_gpus = available_gpus
+        else:
+            self.num_gpus = min(num_gpus, available_gpus)
+
+        self.gpu_ids = list(range(self.num_gpus)) if self.num_gpus > 0 else []
+
         # Setup device
         self.device = torch.device(
-            self.config.get('gpu.device', 'cuda')
-            if torch.cuda.is_available() else 'cpu'
+            'cuda:0' if torch.cuda.is_available() and self.num_gpus > 0 else 'cpu'
         )
 
         # Setup GPU monitor
         self.gpu_monitor = GPUMonitor(
-            device_ids=self.config.get('gpu.device_ids', [0])
+            device_ids=self.gpu_ids if self.gpu_ids else [0]
         )
 
         # Setup benchmark
@@ -77,7 +88,7 @@ class CNNTrainer:
 
         # Mixed precision
         self.use_amp = self.config.get('gpu.mixed_precision', True)
-        self.scaler = GradScaler() if self.use_amp else None
+        self.scaler = GradScaler('cuda') if self.use_amp else None
 
         self.logger.log_header(f"CNN Training - {self.model_name}")
         self._log_configuration()
@@ -87,7 +98,9 @@ class CNNTrainer:
         config_dict = {
             'Model': self.model_name,
             'Device': str(self.device),
-            'Batch Size': self.batch_size,
+            'Num GPUs': self.num_gpus,
+            'GPU IDs': ', '.join(map(str, self.gpu_ids)) if self.gpu_ids else 'None',
+            'Batch Size': f"{self.batch_size} (effective: {self.batch_size * max(1, self.num_gpus)})",
             'Epochs': self.epochs,
             'Learning Rate': self.lr,
             'Image Size': self.image_size,
@@ -97,9 +110,9 @@ class CNNTrainer:
         self.logger.log_config(config_dict)
 
         # Log GPU info
-        if torch.cuda.is_available():
+        if torch.cuda.is_available() and self.gpu_ids:
             gpu_info = {}
-            for device_id in self.config.get('gpu.device_ids', [0]):
+            for device_id in self.gpu_ids:
                 gpu_info[device_id] = self.gpu_monitor.get_gpu_info(device_id)
             self.logger.log_gpu_info(gpu_info)
 
@@ -127,6 +140,11 @@ class CNNTrainer:
             raise ValueError(f"Unknown model: {self.model_name}")
 
         model = model.to(self.device)
+
+        # Wrap with DataParallel for multi-GPU
+        if self.num_gpus > 1:
+            model = nn.DataParallel(model, device_ids=self.gpu_ids)
+            self.logger.info(f"Using DataParallel on {self.num_gpus} GPUs: {self.gpu_ids}")
 
         # Count parameters
         total_params = sum(p.numel() for p in model.parameters())
@@ -190,7 +208,7 @@ class CNNTrainer:
 
             # Forward pass with optional AMP
             if self.use_amp:
-                with autocast():
+                with autocast('cuda'):
                     outputs = model(images)
                     loss = criterion(outputs, labels)
 
@@ -323,10 +341,26 @@ def main():
         default=None,
         help='Path to configuration file'
     )
+    parser.add_argument(
+        '--num-gpus',
+        type=int,
+        default=None,
+        help='Number of GPUs to use (default: 1, 0 = all available)'
+    )
+    parser.add_argument(
+        '--all-gpus',
+        action='store_true',
+        help='Use all available GPUs'
+    )
     args = parser.parse_args()
 
+    # Determine number of GPUs
+    num_gpus = args.num_gpus
+    if args.all_gpus:
+        num_gpus = 0  # 0 means all available
+
     # Run training
-    trainer = CNNTrainer(config_path=args.config)
+    trainer = CNNTrainer(config_path=args.config, num_gpus=num_gpus)
     trainer.train()
 
 
