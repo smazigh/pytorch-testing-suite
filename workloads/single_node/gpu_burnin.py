@@ -2,18 +2,23 @@
 """
 GPU Burn-in Workload - Single Node
 Maximizes GPU utilization for stress testing and validation.
+Supports multi-GPU stress testing with configurable GPU selection.
 """
 
 import os
 import sys
 import argparse
 import time
+import threading
 from pathlib import Path
 from datetime import datetime, timedelta
+from typing import List, Dict, Any
+from queue import Queue
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.multiprocessing as mp
 
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent.parent))
@@ -107,15 +112,173 @@ def attention_stress(batch_size: int, seq_len: int, dim: int, device: torch.devi
     return output
 
 
-class GPUBurnIn:
-    """GPU burn-in stress test."""
+def gpu_worker(gpu_id: int, config: dict, duration_minutes: int, operations: list,
+               results_queue: mp.Queue, stop_event: mp.Event):
+    """
+    Worker function that runs burn-in on a single GPU.
 
-    def __init__(self, config_path: str = None):
+    Args:
+        gpu_id: GPU device ID
+        config: Configuration dictionary
+        duration_minutes: Duration in minutes
+        operations: List of operations to run
+        results_queue: Queue to report results
+        stop_event: Event to signal stop
+    """
+    device = torch.device(f'cuda:{gpu_id}')
+    torch.cuda.set_device(device)
+
+    # Get configuration values
+    batch_size = config.get('training.batch_size', 128)
+    matrix_size = config.get('workloads.gpu_burnin.matrix_size', 8192)
+    image_size = 224
+
+    start_time = time.time()
+    end_time = start_time + (duration_minutes * 60)
+    iteration = 0
+    total_iterations = 0
+
+    for operation in operations:
+        if stop_event.is_set():
+            break
+
+        if operation == 'conv2d':
+            # CNN burn-in
+            model = BurnInModel(channels=128, num_blocks=6).to(device)
+            criterion = nn.CrossEntropyLoss()
+            optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+            generator = SyntheticBurnInGenerator(
+                batch_size=batch_size,
+                input_shape=(3, image_size, image_size),
+                num_classes=1000,
+                device=device
+            )
+
+            while time.time() < end_time and not stop_event.is_set():
+                images, labels = generator.generate()
+                optimizer.zero_grad()
+                outputs = model(images)
+                loss = criterion(outputs, labels)
+                loss.backward()
+                optimizer.step()
+                iteration += 1
+                total_iterations += 1
+
+                # Report metrics periodically
+                if iteration % 50 == 0:
+                    gpu_util = 0
+                    gpu_mem = 0
+                    gpu_temp = 0
+                    try:
+                        import pynvml
+                        pynvml.nvmlInit()
+                        handle = pynvml.nvmlDeviceGetHandleByIndex(gpu_id)
+                        util = pynvml.nvmlDeviceGetUtilizationRates(handle)
+                        mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                        temp = pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU)
+                        gpu_util = util.gpu
+                        gpu_mem = mem.used / (1024**3)
+                        gpu_temp = temp
+                    except:
+                        gpu_mem = torch.cuda.memory_allocated(device) / (1024**3)
+
+                    results_queue.put({
+                        'gpu_id': gpu_id,
+                        'operation': operation,
+                        'iteration': iteration,
+                        'utilization': gpu_util,
+                        'memory_gb': gpu_mem,
+                        'temperature': gpu_temp,
+                        'loss': loss.item() if 'loss' in dir() else 0
+                    })
+
+            del model, optimizer, generator
+            torch.cuda.empty_cache()
+
+        elif operation == 'matmul':
+            # Matrix multiplication burn-in
+            A = torch.randn(matrix_size, matrix_size, device=device)
+            B = torch.randn(matrix_size, matrix_size, device=device)
+
+            while time.time() < end_time and not stop_event.is_set():
+                for _ in range(5):
+                    C = torch.matmul(A, B)
+                    A = C
+                iteration += 1
+                total_iterations += 1
+
+                if iteration % 20 == 0:
+                    gpu_mem = torch.cuda.memory_allocated(device) / (1024**3)
+                    results_queue.put({
+                        'gpu_id': gpu_id,
+                        'operation': operation,
+                        'iteration': iteration,
+                        'utilization': 0,
+                        'memory_gb': gpu_mem,
+                        'temperature': 0,
+                        'loss': 0
+                    })
+
+            del A, B
+            torch.cuda.empty_cache()
+
+        elif operation == 'attention':
+            # Attention burn-in
+            attn_batch = 32
+            seq_len = 512
+            dim = 768
+
+            while time.time() < end_time and not stop_event.is_set():
+                Q = torch.randn(attn_batch, seq_len, dim, device=device)
+                K = torch.randn(attn_batch, seq_len, dim, device=device)
+                V = torch.randn(attn_batch, seq_len, dim, device=device)
+
+                scores = torch.matmul(Q, K.transpose(-2, -1)) / (dim ** 0.5)
+                attn = F.softmax(scores, dim=-1)
+                output = torch.matmul(attn, V)
+
+                iteration += 1
+                total_iterations += 1
+
+                if iteration % 30 == 0:
+                    gpu_mem = torch.cuda.memory_allocated(device) / (1024**3)
+                    results_queue.put({
+                        'gpu_id': gpu_id,
+                        'operation': operation,
+                        'iteration': iteration,
+                        'utilization': 0,
+                        'memory_gb': gpu_mem,
+                        'temperature': 0,
+                        'loss': 0
+                    })
+
+                del Q, K, V, scores, attn, output
+
+            torch.cuda.empty_cache()
+
+    # Final report
+    results_queue.put({
+        'gpu_id': gpu_id,
+        'operation': 'DONE',
+        'iteration': total_iterations,
+        'utilization': 0,
+        'memory_gb': 0,
+        'temperature': 0,
+        'loss': 0
+    })
+
+
+class GPUBurnIn:
+    """GPU burn-in stress test with multi-GPU support."""
+
+    def __init__(self, config_path: str = None, num_gpus: int = None):
         """
         Initialize GPU burn-in.
 
         Args:
             config_path: Path to configuration file
+            num_gpus: Number of GPUs to use (None = use config or 1)
         """
         # Load configuration
         self.config = load_config(config_path)
@@ -127,15 +290,24 @@ class GPUBurnIn:
             level=self.config.get('general.log_level', 'INFO')
         )
 
-        # Setup device
+        # Determine number of GPUs
+        available_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 0
+        if num_gpus is not None:
+            self.num_gpus = min(num_gpus, available_gpus)
+        else:
+            config_gpus = len(self.config.get('gpu.device_ids', [0]))
+            self.num_gpus = min(config_gpus, available_gpus) if available_gpus > 0 else 0
+
+        self.gpu_ids = list(range(self.num_gpus))
+
+        # Setup device (primary)
         self.device = torch.device(
-            self.config.get('gpu.device', 'cuda')
-            if torch.cuda.is_available() else 'cpu'
+            f'cuda:0' if torch.cuda.is_available() else 'cpu'
         )
 
-        # Setup GPU monitor
+        # Setup GPU monitor for all GPUs
         self.gpu_monitor = GPUMonitor(
-            device_ids=self.config.get('gpu.device_ids', [0])
+            device_ids=self.gpu_ids if self.gpu_ids else [0]
         )
 
         # Setup benchmark
@@ -154,13 +326,18 @@ class GPUBurnIn:
         self.batch_size = self.config.get('training.batch_size', 128)
         self.image_size = 224
 
+        # Multi-GPU state
+        self.gpu_metrics = {gpu_id: {'iteration': 0, 'utilization': 0, 'memory_gb': 0, 'temperature': 0, 'operation': 'idle'}
+                           for gpu_id in self.gpu_ids}
+
         self.logger.log_header("GPU Burn-in Test")
         self._log_configuration()
 
     def _log_configuration(self):
         """Log configuration details."""
         config_dict = {
-            'Device': str(self.device),
+            'Mode': f"Multi-GPU ({self.num_gpus} GPUs)" if self.num_gpus > 1 else "Single GPU",
+            'GPU IDs': ', '.join(map(str, self.gpu_ids)) if self.gpu_ids else 'None',
             'Duration': f"{self.duration_minutes} minutes",
             'Stress Level': f"{self.stress_level}%",
             'Matrix Size': self.matrix_size,
@@ -173,9 +350,133 @@ class GPUBurnIn:
         # Log GPU info
         if torch.cuda.is_available():
             gpu_info = {}
-            for device_id in self.config.get('gpu.device_ids', [0]):
+            for device_id in self.gpu_ids:
                 gpu_info[device_id] = self.gpu_monitor.get_gpu_info(device_id)
             self.logger.log_gpu_info(gpu_info)
+
+    def _format_gpu_status(self):
+        """Format current GPU status for display."""
+        lines = []
+        for gpu_id in self.gpu_ids:
+            metrics = self.gpu_metrics.get(gpu_id, {})
+            op = metrics.get('operation', 'idle')[:8]
+            iters = metrics.get('iteration', 0)
+            util = metrics.get('utilization', 0)
+            mem = metrics.get('memory_gb', 0)
+            temp = metrics.get('temperature', 0)
+
+            if temp > 0:
+                lines.append(f"GPU{gpu_id}: {op:8s} | iter:{iters:5d} | {util:3.0f}% | {mem:.1f}GB | {temp}°C")
+            else:
+                lines.append(f"GPU{gpu_id}: {op:8s} | iter:{iters:5d} | {mem:.1f}GB")
+
+        return '\n'.join(lines)
+
+    def run_multi_gpu(self):
+        """Run burn-in on multiple GPUs simultaneously."""
+        self.logger.info(f"Starting multi-GPU burn-in on {self.num_gpus} GPUs...")
+        self.logger.info(f"GPU IDs: {self.gpu_ids}")
+        self.logger.info(f"Operations: {', '.join(self.operations)}")
+        self.logger.info(f"Duration: {self.duration_minutes} minutes")
+        self.logger.info("")
+
+        # Create multiprocessing context
+        mp.set_start_method('spawn', force=True)
+        results_queue = mp.Queue()
+        stop_event = mp.Event()
+
+        # Convert config to dict for passing to workers
+        config_dict = {
+            'training.batch_size': self.batch_size,
+            'workloads.gpu_burnin.matrix_size': self.matrix_size,
+        }
+
+        # Start worker processes
+        processes = []
+        for gpu_id in self.gpu_ids:
+            p = mp.Process(
+                target=gpu_worker,
+                args=(gpu_id, config_dict, self.duration_minutes, self.operations,
+                      results_queue, stop_event)
+            )
+            p.start()
+            processes.append(p)
+            self.logger.info(f"Started worker process for GPU {gpu_id}")
+
+        # Monitor progress
+        start_time = time.time()
+        end_time = start_time + (self.duration_minutes * 60)
+        completed_gpus = set()
+        last_log_time = 0
+
+        self.logger.info("")
+        self.logger.log_header("GPU Status Monitor")
+
+        try:
+            while len(completed_gpus) < self.num_gpus:
+                # Process results from queue
+                while not results_queue.empty():
+                    try:
+                        result = results_queue.get_nowait()
+                        gpu_id = result['gpu_id']
+
+                        if result['operation'] == 'DONE':
+                            completed_gpus.add(gpu_id)
+                            self.gpu_metrics[gpu_id]['operation'] = 'done'
+                            self.gpu_metrics[gpu_id]['iteration'] = result['iteration']
+                            self.logger.info(f"GPU {gpu_id} completed: {result['iteration']} total iterations")
+                        else:
+                            self.gpu_metrics[gpu_id] = {
+                                'operation': result['operation'],
+                                'iteration': result['iteration'],
+                                'utilization': result['utilization'],
+                                'memory_gb': result['memory_gb'],
+                                'temperature': result['temperature']
+                            }
+                    except:
+                        break
+
+                # Log status periodically
+                current_time = time.time()
+                if current_time - last_log_time >= 5:  # Log every 5 seconds
+                    elapsed = current_time - start_time
+                    remaining = max(0, end_time - current_time)
+
+                    self.logger.info(f"\n{'='*60}")
+                    self.logger.info(f"Elapsed: {elapsed/60:.1f}m | Remaining: {remaining/60:.1f}m")
+                    self.logger.info(f"{'='*60}")
+                    self.logger.info(self._format_gpu_status())
+
+                    last_log_time = current_time
+
+                time.sleep(0.5)
+
+        except KeyboardInterrupt:
+            self.logger.warning("Interrupt received, stopping workers...")
+            stop_event.set()
+
+        # Wait for all processes to complete
+        for p in processes:
+            p.join(timeout=10)
+            if p.is_alive():
+                p.terminate()
+
+        # Final summary
+        self.logger.info("")
+        self.logger.log_header("Multi-GPU Burn-in Complete")
+
+        total_iterations = sum(m.get('iteration', 0) for m in self.gpu_metrics.values())
+        elapsed_time = time.time() - start_time
+
+        self.logger.info(f"Total GPUs: {self.num_gpus}")
+        self.logger.info(f"Total iterations: {total_iterations}")
+        self.logger.info(f"Elapsed time: {elapsed_time/60:.1f} minutes")
+        self.logger.info(f"Avg iterations/GPU: {total_iterations/self.num_gpus:.0f}")
+
+        self.logger.info("\nPer-GPU Summary:")
+        for gpu_id in self.gpu_ids:
+            iters = self.gpu_metrics[gpu_id].get('iteration', 0)
+            self.logger.info(f"  GPU {gpu_id}: {iters} iterations")
 
     def run_cnn_burnin(self):
         """Run CNN-based burn-in."""
@@ -351,6 +652,14 @@ class GPUBurnIn:
             self.logger.error("CUDA not available. Cannot run GPU burn-in.")
             return
 
+        # Use multi-GPU mode if more than one GPU
+        if self.num_gpus > 1:
+            self.run_multi_gpu()
+            return
+
+        # Single GPU mode
+        self.logger.info(f"Running single-GPU burn-in on GPU 0...")
+
         # Configure benchmark
         self.benchmark.configure(batch_size=self.batch_size)
 
@@ -389,10 +698,26 @@ def main():
         default=None,
         help='Duration in minutes (overrides config)'
     )
+    parser.add_argument(
+        '--num-gpus',
+        type=int,
+        default=None,
+        help='Number of GPUs to use for stress testing (default: 1, use 0 or "all" for all available)'
+    )
+    parser.add_argument(
+        '--all-gpus',
+        action='store_true',
+        help='Use all available GPUs'
+    )
     args = parser.parse_args()
 
+    # Determine number of GPUs
+    num_gpus = args.num_gpus
+    if args.all_gpus:
+        num_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 0
+
     # Run burn-in
-    burnin = GPUBurnIn(config_path=args.config)
+    burnin = GPUBurnIn(config_path=args.config, num_gpus=num_gpus)
 
     # Override duration if specified
     if args.duration is not None:
