@@ -77,7 +77,15 @@ echo "PyTorch Testing Framework - Single Node"
 echo "========================================="
 echo "Workload: $WORKLOAD"
 echo "Config: $CONFIG"
-echo "GPU ID: $GPU_ID"
+if [ "$WORKLOAD" = "gpu_burnin" ] && { [ -n "$NUM_GPUS" ] || [ "$ALL_GPUS" = "true" ]; }; then
+    if [ "$ALL_GPUS" = "true" ]; then
+        echo "GPUs: All available"
+    else
+        echo "GPUs: $NUM_GPUS"
+    fi
+else
+    echo "GPU ID: $GPU_ID"
+fi
 echo "========================================="
 echo ""
 
@@ -93,8 +101,13 @@ if [ ! -f "$REPO_ROOT/$CONFIG" ]; then
     exit 1
 fi
 
-# Set GPU device
-export CUDA_VISIBLE_DEVICES=$GPU_ID
+# Set GPU device (only for single GPU mode, not for multi-GPU burn-in)
+if [ "$WORKLOAD" = "gpu_burnin" ] && { [ -n "$NUM_GPUS" ] || [ "$ALL_GPUS" = "true" ]; }; then
+    # Multi-GPU mode: don't restrict CUDA_VISIBLE_DEVICES
+    echo "Multi-GPU mode: using all visible GPUs"
+else
+    export CUDA_VISIBLE_DEVICES=$GPU_ID
+fi
 
 # Determine workload path
 case $WORKLOAD in
