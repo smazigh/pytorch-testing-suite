@@ -257,6 +257,122 @@ Show PyTorch capabilities:
 ./deployment/standalone/run_single.sh --workload transformer_training
 ```
 
+### 4. Reinforcement Learning with PPO
+Test RL workloads:
+```bash
+# Run PPO training
+python workloads/reinforcement_learning/ppo_training.py
+
+# With custom config
+python workloads/reinforcement_learning/ppo_training.py --config config/config.yaml
+```
+
+## PPO Training Details
+
+The PPO (Proximal Policy Optimization) workload implements a complete reinforcement learning training pipeline using a synthetic environment that requires no external dependencies.
+
+### Architecture
+
+**Actor-Critic Network:**
+- Shared feature extraction: Two fully-connected layers (256 units, ReLU)
+- Actor head: Gaussian (continuous) or Categorical (discrete) policy
+- Critic head: State value estimation
+
+**Training Pipeline:**
+1. Collect trajectories (2048 steps by default)
+2. Compute returns using Generalized Advantage Estimation (GAE)
+3. Run multiple PPO epochs with clipped surrogate objective
+4. Log metrics and repeat
+
+### Configuration
+
+Configure PPO in `config/config.yaml`:
+
+```yaml
+training:
+  epochs: 100           # Total training episodes
+  learning_rate: 0.0003 # Learning rate for Adam optimizer
+
+workloads:
+  reinforcement_learning:
+    algorithm: ppo
+    environment: synthetic
+    env_type: continuous  # continuous or discrete
+
+    ppo:
+      clip_epsilon: 0.2      # PPO clipping parameter
+      value_coef: 0.5        # Critic loss coefficient
+      entropy_coef: 0.01     # Entropy bonus coefficient
+      gae_lambda: 0.95       # GAE lambda for advantage estimation
+      num_steps: 2048        # Environment steps per episode
+      num_epochs: 10         # PPO optimization epochs per episode
+      mini_batch_size: 64    # Mini-batch size for updates
+```
+
+### Key Hyperparameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `clip_epsilon` | 0.2 | Clipping range for policy ratio |
+| `gae_lambda` | 0.95 | GAE lambda for bias-variance tradeoff |
+| `num_steps` | 2048 | Trajectory length per episode |
+| `num_epochs` | 10 | Optimization passes per trajectory |
+| `mini_batch_size` | 64 | Samples per gradient update |
+
+### Environment
+
+The PPO trainer uses a `SyntheticReinforcementEnvironment` with:
+- **State dimension**: 4
+- **Action dimension**: 2
+- **Episode length**: 200 steps
+- **Action space**: Continuous (default) or discrete
+
+### Output
+
+PPO training generates:
+- Real-time logging every 10 episodes (reward, loss)
+- Performance benchmarks (throughput, timing)
+- Results saved to `results/ppo_training_summary.json`
+
+Example output:
+```
+================================================================================
+  PPO Training
+================================================================================
+
+Configuration:
+  Device: cuda
+  Total Episodes: 100
+  Steps per Episode: 2048
+  PPO Epochs: 10
+  Mini Batch Size: 64
+  Clip Epsilon: 0.2
+  Learning Rate: 0.0003
+
+Episode 10/100 | Avg Reward: 0.45 | Loss: 0.1234
+Episode 20/100 | Avg Reward: 0.68 | Loss: 0.0987
+...
+```
+
+### Running PPO Training
+
+**Direct execution:**
+```bash
+python workloads/reinforcement_learning/ppo_training.py
+```
+
+**With custom configuration:**
+```bash
+python workloads/reinforcement_learning/ppo_training.py --config path/to/config.yaml
+```
+
+**Override settings via environment variables:**
+```bash
+export PYTORCH_TEST_TRAINING_EPOCHS=200
+export PYTORCH_TEST_TRAINING_LEARNING_RATE=0.0001
+python workloads/reinforcement_learning/ppo_training.py
+```
+
 ## Troubleshooting
 
 **CUDA Out of Memory:**
