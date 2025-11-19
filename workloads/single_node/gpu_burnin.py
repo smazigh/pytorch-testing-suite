@@ -354,23 +354,41 @@ class GPUBurnIn:
                 gpu_info[device_id] = self.gpu_monitor.get_gpu_info(device_id)
             self.logger.log_gpu_info(gpu_info)
 
-    def _format_gpu_status(self):
-        """Format current GPU status for display."""
-        lines = []
+    def _format_gpu_status_line(self):
+        """Format current GPU status as a single concise line."""
+        parts = []
         for gpu_id in self.gpu_ids:
             metrics = self.gpu_metrics.get(gpu_id, {})
-            op = metrics.get('operation', 'idle')[:8]
+            op = metrics.get('operation', 'idle')[:6]
             iters = metrics.get('iteration', 0)
-            util = metrics.get('utilization', 0)
             mem = metrics.get('memory_gb', 0)
             temp = metrics.get('temperature', 0)
 
             if temp > 0:
-                lines.append(f"GPU{gpu_id}: {op:8s} | iter:{iters:5d} | {util:3.0f}% | {mem:.1f}GB | {temp}°C")
+                parts.append(f"G{gpu_id}:{op}:{iters}it:{mem:.1f}GB:{temp}C")
             else:
-                lines.append(f"GPU{gpu_id}: {op:8s} | iter:{iters:5d} | {mem:.1f}GB")
+                parts.append(f"G{gpu_id}:{op}:{iters}it:{mem:.1f}GB")
 
-        return '\n'.join(lines)
+        return " | ".join(parts)
+
+    def _print_status_update(self, elapsed, remaining, final=False):
+        """Print in-place status update."""
+        import sys
+
+        status = self._format_gpu_status_line()
+        time_info = f"[{elapsed/60:.1f}m/{(elapsed+remaining)/60:.1f}m]"
+
+        # Clear line and print status
+        line = f"\r{time_info} {status}"
+
+        # Pad to clear any previous longer output
+        line = line.ljust(120)
+
+        sys.stdout.write(line)
+        sys.stdout.flush()
+
+        if final:
+            sys.stdout.write("\n")
 
     def run_multi_gpu(self):
         """Run burn-in on multiple GPUs simultaneously."""
@@ -407,10 +425,9 @@ class GPUBurnIn:
         start_time = time.time()
         end_time = start_time + (self.duration_minutes * 60)
         completed_gpus = set()
-        last_log_time = 0
+        last_update_time = 0
 
         self.logger.info("")
-        self.logger.log_header("GPU Status Monitor")
 
         try:
             while len(completed_gpus) < self.num_gpus:
@@ -424,7 +441,6 @@ class GPUBurnIn:
                             completed_gpus.add(gpu_id)
                             self.gpu_metrics[gpu_id]['operation'] = 'done'
                             self.gpu_metrics[gpu_id]['iteration'] = result['iteration']
-                            self.logger.info(f"GPU {gpu_id} completed: {result['iteration']} total iterations")
                         else:
                             self.gpu_metrics[gpu_id] = {
                                 'operation': result['operation'],
@@ -436,24 +452,23 @@ class GPUBurnIn:
                     except:
                         break
 
-                # Log status periodically
+                # Update status in place
                 current_time = time.time()
-                if current_time - last_log_time >= 5:  # Log every 5 seconds
+                if current_time - last_update_time >= 1:  # Update every second
                     elapsed = current_time - start_time
                     remaining = max(0, end_time - current_time)
+                    self._print_status_update(elapsed, remaining)
+                    last_update_time = current_time
 
-                    self.logger.info(f"\n{'='*60}")
-                    self.logger.info(f"Elapsed: {elapsed/60:.1f}m | Remaining: {remaining/60:.1f}m")
-                    self.logger.info(f"{'='*60}")
-                    self.logger.info(self._format_gpu_status())
-
-                    last_log_time = current_time
-
-                time.sleep(0.5)
+                time.sleep(0.1)
 
         except KeyboardInterrupt:
+            self._print_status_update(time.time() - start_time, 0, final=True)
             self.logger.warning("Interrupt received, stopping workers...")
             stop_event.set()
+
+        # Final status update
+        self._print_status_update(time.time() - start_time, 0, final=True)
 
         # Wait for all processes to complete
         for p in processes:

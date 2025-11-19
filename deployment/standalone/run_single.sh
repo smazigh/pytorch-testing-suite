@@ -8,6 +8,9 @@ set -e
 WORKLOAD="cnn_training"
 CONFIG="config/config.yaml"
 GPU_ID=0
+NUM_GPUS=""
+ALL_GPUS=""
+DURATION=""
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -24,20 +27,37 @@ while [[ $# -gt 0 ]]; do
       GPU_ID="$2"
       shift 2
       ;;
+    --num-gpus)
+      NUM_GPUS="$2"
+      shift 2
+      ;;
+    --all-gpus)
+      ALL_GPUS="true"
+      shift
+      ;;
+    --duration)
+      DURATION="$2"
+      shift 2
+      ;;
     --help)
       echo "Usage: $0 [OPTIONS]"
       echo ""
       echo "Options:"
       echo "  --workload WORKLOAD    Workload to run (default: cnn_training)"
       echo "                         Options: cnn_training, transformer_training,"
-      echo "                                  mixed_precision, gpu_burnin"
+      echo "                                  mixed_precision, gpu_burnin, ppo_training"
       echo "  --config CONFIG        Path to config file (default: config/config.yaml)"
-      echo "  --gpu GPU_ID          GPU device ID (default: 0)"
-      echo "  --help                Show this help message"
+      echo "  --gpu GPU_ID           GPU device ID (default: 0)"
+      echo "  --num-gpus N           Number of GPUs for burn-in (gpu_burnin only)"
+      echo "  --all-gpus             Use all available GPUs (gpu_burnin only)"
+      echo "  --duration MINS        Duration in minutes (gpu_burnin only)"
+      echo "  --help                 Show this help message"
       echo ""
       echo "Examples:"
       echo "  $0 --workload cnn_training --gpu 0"
       echo "  $0 --workload gpu_burnin --config my_config.yaml"
+      echo "  $0 --workload gpu_burnin --num-gpus 4 --duration 30"
+      echo "  $0 --workload gpu_burnin --all-gpus"
       exit 0
       ;;
     *)
@@ -102,10 +122,25 @@ esac
 
 # Run workload
 cd "$REPO_ROOT"
-echo "Running: python3 $SCRIPT --config $CONFIG"
+
+# Build command with extra arguments for gpu_burnin
+EXTRA_ARGS=""
+if [ "$WORKLOAD" = "gpu_burnin" ]; then
+  if [ -n "$NUM_GPUS" ]; then
+    EXTRA_ARGS="$EXTRA_ARGS --num-gpus $NUM_GPUS"
+  fi
+  if [ "$ALL_GPUS" = "true" ]; then
+    EXTRA_ARGS="$EXTRA_ARGS --all-gpus"
+  fi
+  if [ -n "$DURATION" ]; then
+    EXTRA_ARGS="$EXTRA_ARGS --duration $DURATION"
+  fi
+fi
+
+echo "Running: python3 $SCRIPT --config $CONFIG $EXTRA_ARGS"
 echo ""
 
-python3 "$SCRIPT" --config "$CONFIG"
+python3 "$SCRIPT" --config "$CONFIG" $EXTRA_ARGS
 
 echo ""
 echo "========================================="

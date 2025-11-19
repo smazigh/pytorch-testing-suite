@@ -228,8 +228,14 @@ Summary:
 ### 1. Infrastructure Validation
 Test new GPU hardware or cluster setup:
 ```bash
-# Run comprehensive burn-in
+# Single GPU burn-in
 ./deployment/standalone/run_single.sh --workload gpu_burnin
+
+# Multi-GPU burn-in (all GPUs)
+./deployment/standalone/run_single.sh --workload gpu_burnin --all-gpus
+
+# Specific number of GPUs
+./deployment/standalone/run_single.sh --workload gpu_burnin --num-gpus 4 --duration 30
 
 # Verify multi-GPU communication
 ./deployment/standalone/run_multi.sh --workload ddp_training --num-gpus 8
@@ -371,6 +377,86 @@ python workloads/reinforcement_learning/ppo_training.py --config path/to/config.
 export PYTORCH_TEST_TRAINING_EPOCHS=200
 export PYTORCH_TEST_TRAINING_LEARNING_RATE=0.0001
 python workloads/reinforcement_learning/ppo_training.py
+```
+
+## GPU Burn-in Details
+
+The GPU burn-in workload maximizes GPU utilization for stress testing and validation, with support for multi-GPU parallel stress testing.
+
+### Features
+
+- **Multi-GPU Support**: Stress test multiple GPUs simultaneously
+- **Configurable Operations**: matmul, conv2d, attention
+- **Real-time Monitoring**: In-place status updates showing all GPU metrics
+- **Graceful Shutdown**: Ctrl+C stops all workers cleanly
+
+### Running GPU Burn-in
+
+**Single GPU:**
+```bash
+./deployment/standalone/run_single.sh --workload gpu_burnin
+```
+
+**All available GPUs:**
+```bash
+./deployment/standalone/run_single.sh --workload gpu_burnin --all-gpus
+```
+
+**Specific number of GPUs with custom duration:**
+```bash
+./deployment/standalone/run_single.sh --workload gpu_burnin --num-gpus 4 --duration 60
+```
+
+**Direct execution:**
+```bash
+python workloads/single_node/gpu_burnin.py --num-gpus 4 --duration 30
+python workloads/single_node/gpu_burnin.py --all-gpus
+```
+
+### Configuration
+
+Configure burn-in in `config/config.yaml`:
+
+```yaml
+burnin:
+  duration_minutes: 30
+  target_utilization: 95
+  memory_fraction: 0.9
+
+workloads:
+  gpu_burnin:
+    matrix_size: 8192
+    operations: [matmul, conv2d, attention]
+    stress_level: 100
+```
+
+### Console Output
+
+The multi-GPU mode displays a concise, in-place status line:
+
+```
+[5.2m/30.0m] G0:conv2d:1250it:8.2GB:72C | G1:conv2d:1248it:8.1GB:71C | G2:conv2d:1251it:8.3GB:73C
+```
+
+Format: `[elapsed/total] GPU_ID:operation:iterations:memory:temperature`
+
+### Final Summary
+
+```
+================================================================================
+  Multi-GPU Burn-in Complete
+================================================================================
+
+Total GPUs: 4
+Total iterations: 25000
+Elapsed time: 30.0 minutes
+Avg iterations/GPU: 6250
+
+Per-GPU Summary:
+  GPU 0: 6248 iterations
+  GPU 1: 6251 iterations
+  GPU 2: 6250 iterations
+  GPU 3: 6251 iterations
 ```
 
 ## Troubleshooting
